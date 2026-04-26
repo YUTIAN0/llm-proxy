@@ -187,8 +187,8 @@ func (a *GeminiToOpenAIAdaptor) ConvertRequest(c *gin.Context, info *RelayInfo, 
 		MaxTokens: &maxTokens,
 	}
 
-	if s, ok := geminiReq["stream"].(bool); ok && s {
-		info.IsStream = true
+	// Always set stream based on info.IsStream (detected from URL or query param)
+	if info.IsStream {
 		stream := true
 		result.Stream = &stream
 	}
@@ -290,7 +290,7 @@ func (a *GeminiToOpenAIAdaptor) convertOpenAIToGemini(openaiResp map[string]any,
 	return result
 }
 
-// streamGeminiResponse handles Gemini streaming: reads upstream SSE, converts to Claude format.
+// streamGeminiResponse handles Gemini streaming: reads upstream OpenAI SSE, converts to Gemini format.
 func (a *GeminiToOpenAIAdaptor) streamGeminiResponse(c *gin.Context, resp *http.Response) error {
 	if resp.StatusCode != http.StatusOK {
 		errBody, _ := io.ReadAll(resp.Body)
@@ -310,12 +310,13 @@ func (a *GeminiToOpenAIAdaptor) streamGeminiResponse(c *gin.Context, resp *http.
 		return fmt.Errorf("streaming not supported")
 	}
 
-	state := &GeminiStreamState{}
-
 	var utf8Remainder []byte
 	scanner := bufio.NewScanner(resp.Body)
 	buf := make([]byte, 0, 64*1024)
 	scanner.Buffer(buf, 1024*1024)
+
+	accumulatedText := ""
+	accumulatedThought := ""
 
 	for scanner.Scan() {
 		line := scanner.Text()
@@ -340,18 +341,23 @@ func (a *GeminiToOpenAIAdaptor) streamGeminiResponse(c *gin.Context, resp *http.
 			debugLog("[UPSTREAM GEMINI SSE] data=%s", truncateStr(dataStr, 500))
 
 			if dataStr == "[DONE]" {
-				a.sendGeminiStreamEnd(c, state)
+				// Send final response with usage if available
 				flusher.Flush()
 				break
 			}
 
-			var geminiResp map[string]any
-			if err := json.Unmarshal([]byte(dataStr), &geminiResp); err != nil {
+			var openaiResp map[string]any
+			if err := json.Unmarshal([]byte(dataStr), &openaiResp); err != nil {
 				continue
 			}
 
-			a.geminiSseToClaude(c, geminiResp, state)
-			flusher.Flush()
+			// Convert OpenAI chunk to Gemini format
+			geminiChunk := a.convertOpenAIStreamChunkToGemini(openaiResp, &accumulatedText, &accumulatedThought)
+			if geminiChunk != nil {
+				chunkData, _ := json.Marshal(geminiChunk)
+				c.Writer.WriteString("data: " + string(chunkData) + "\n\n")
+				flusher.Flush()
+			}
 		}
 	}
 
@@ -361,6 +367,110 @@ func (a *GeminiToOpenAIAdaptor) streamGeminiResponse(c *gin.Context, resp *http.
 	}
 
 	return nil
+}
+
+// convertOpenAIStreamChunkToGemini converts an OpenAI stream chunk to Gemini format.
+func (a *GeminiToOpenAIAdaptor) convertOpenAIStreamChunkToGemini(openaiResp map[string]any, accumulatedText, accumulatedThought *string) map[string]any {
+	choices, ok := openaiResp["choices"].([]any)
+	if !ok || len(choices) == 0 {
+		// Check for usage in final chunk
+		if usage, ok := openaiResp["usage"].(map[string]any); ok {
+			return map[string]any{
+				"usageMetadata": map[string]any{
+					"promptTokenCount":     usage["prompt_tokens"],
+					"candidatesTokenCount": usage["completion_tokens"],
+					"totalTokenCount":      usage["total_tokens"],
+				},
+			}
+		}
+		return nil
+	}
+
+	choice, ok := choices[0].(map[string]any)
+	if !ok {
+		return nil
+	}
+
+	delta, ok := choice["delta"].(map[string]any)
+	if !ok {
+		return nil
+	}
+
+	parts := make([]map[string]any, 0)
+
+	// Handle reasoning content (thinking)
+	if reasoning, ok := delta["reasoning_content"].(string); ok && reasoning != "" {
+		*accumulatedThought += reasoning
+		parts = append(parts, map[string]any{
+			"thought": true,
+			"text":    *accumulatedThought,
+		})
+	}
+
+	// Handle regular content
+	if content, ok := delta["content"].(string); ok && content != "" {
+		*accumulatedText += content
+		parts = append(parts, map[string]any{
+			"text": *accumulatedText,
+		})
+	}
+
+	// Handle tool calls
+	if toolCalls, ok := delta["tool_calls"].([]any); ok && len(toolCalls) > 0 {
+		for _, tc := range toolCalls {
+			if tcMap, ok := tc.(map[string]any); ok {
+				funcMap, _ := tcMap["function"].(map[string]any)
+				name, _ := funcMap["name"].(string)
+				args, _ := funcMap["arguments"].(string)
+
+				argsMap := map[string]any{}
+				if args != "" {
+					json.Unmarshal([]byte(args), &argsMap)
+				}
+
+				parts = append(parts, map[string]any{
+					"functionCall": map[string]any{
+						"name": name,
+						"args": argsMap,
+					},
+				})
+			}
+		}
+	}
+
+	if len(parts) == 0 {
+		return nil
+	}
+
+	// Check finish reason
+	finishReason := ""
+	if fr, ok := choice["finish_reason"].(string); ok {
+		switch fr {
+		case "stop":
+			finishReason = "STOP"
+		case "length":
+			finishReason = "MAX_TOKENS"
+		case "tool_calls":
+			finishReason = "STOP"
+		}
+	}
+
+	result := map[string]any{
+		"candidates": []map[string]any{
+			{
+				"content": map[string]any{
+					"parts": parts,
+					"role":  "model",
+				},
+			},
+		},
+	}
+
+	if finishReason != "" {
+		result["candidates"].([]map[string]any)[0]["finishReason"] = finishReason
+	}
+
+	return result
 }
 
 // sendGeminiStreamEnd sends the final message_delta and message_stop events.

@@ -47,6 +47,14 @@ func RelayHandler(c *gin.Context) {
 		}
 	}
 
+	// Gemini streaming is indicated by endpoint name or alt=sse query param
+	if strings.Contains(path, ":streamGenerateContent") {
+		info.IsStream = true
+	}
+	if c.Query("alt") == "sse" {
+		info.IsStream = true
+	}
+
 	clientAPIKey := c.GetHeader("X-API-Key")
 	if clientAPIKey == "" {
 		clientAPIKey = c.GetHeader("x-api-key")
@@ -68,7 +76,7 @@ func RelayHandler(c *gin.Context) {
 	if strings.HasSuffix(path, "/messages") && !strings.Contains(path, "/v1/chat/") {
 		ch = channel.GetDefault()
 		info.Format = "claude"
-	} else if strings.Contains(path, "/models/") && strings.Contains(path, ":generateContent") {
+	} else if strings.Contains(path, "/models/") && (strings.Contains(path, ":generateContent") || strings.Contains(path, ":streamGenerateContent")) {
 		ch = channel.GetDefault()
 		info.Format = "gemini_to_openai"
 		info.OriginModel = extractModelFromPath(path)
