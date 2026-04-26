@@ -963,15 +963,15 @@ func (a *ClaudeToOpenAIAdaptor) emitTextDelta(c *gin.Context, text string, state
 }
 
 func (a *ClaudeToOpenAIAdaptor) extractThinkingTags(text string, state *ClaudeStreamState) (thinking string, remaining string) {
-	// Check for  tags (used by MiniMax and other models)
-	if strings.HasPrefix(text, "") {
-		endTag := ""
+	// Check for <think> tags (used by MiniMax and other models)
+	if strings.HasPrefix(text, "<think>") {
+		endTag := "</think>"
 		if endIdx := strings.Index(text, endTag); endIdx > 0 {
-			thinking = text[len("") : endIdx]
+			thinking = text[len("<think>") : endIdx]
 			remaining = text[endIdx+len(endTag):]
 			return thinking, remaining
 		}
-		thinking = text[len(""):]
+		thinking = text[len("<think>"):]
 		remaining = ""
 		return thinking, remaining
 	}
@@ -989,14 +989,14 @@ func (a *ClaudeToOpenAIAdaptor) extractThinkingTags(text string, state *ClaudeSt
 		return thinking, remaining
 	}
 
-	// Check for \n or \r\n prefix (some models add newline)
+	// Check for <think>\n or <think>\r\n prefix (some models add newline)
 	trimmed := strings.TrimLeftFunc(text, func(r rune) bool {
 		return r == '\n' || r == '\r'
 	})
-	if strings.HasPrefix(trimmed, "") {
+	if strings.HasPrefix(trimmed, "<think>") {
 		prefix := text[:len(text)-len(trimmed)]
-		endTag := ""
-		rest := trimmed[len(""):]
+		endTag := "</think>"
+		rest := trimmed[len("<think>"):]
 		if endIdx := strings.Index(rest, endTag); endIdx > 0 {
 			thinking = rest[:endIdx]
 			remaining = prefix + rest[endIdx+len(endTag):]
