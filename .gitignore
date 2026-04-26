@@ -1,0 +1,31 @@
+# Binaries
+llm-proxy
+*.exe
+*.exe~
+*.dll
+*.so
+*.dylib
+
+# Test binary
+*.test
+
+# Output of go coverage
+*.out
+
+# Dependency directories
+vendor/
+
+# IDE
+.idea/
+.vscode/
+*.swp
+*.swo
+
+# Config files with secrets
+config.yaml
+config2.yaml
+env
+
+# External repos
+cc-switch/
+new-api/
