@@ -68,7 +68,7 @@ func (a *OpenAIToGeminiAdaptor) DoRequest(c *gin.Context, info *RelayInfo, reque
 	if err != nil {
 		return nil, err
 	}
-	a.SetupRequestHeader(&req.Header, info)
+	_ = a.SetupRequestHeader(&req.Header, info)
 
 	client := proxy.GetClient()
 	if client == nil {
@@ -95,6 +95,7 @@ func (a *OpenAIToGeminiAdaptor) DoResponse(c *gin.Context, resp *http.Response, 
 	return ResponseGeminiChat2OpenAI(geminiResp, info.OriginModel), nil
 }
 
+//nolint:errcheck
 func (a *OpenAIToGeminiAdaptor) streamGeminiToOpenAI(c *gin.Context, resp *http.Response) error {
 	if resp.StatusCode != http.StatusOK {
 		errBody, _ := io.ReadAll(resp.Body)

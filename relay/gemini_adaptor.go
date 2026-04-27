@@ -202,7 +202,7 @@ func (a *GeminiToOpenAIAdaptor) DoRequest(c *gin.Context, info *RelayInfo, reque
 	if err != nil {
 		return nil, err
 	}
-	a.SetupRequestHeader(&httpReq.Header, info)
+	_ = a.SetupRequestHeader(&httpReq.Header, info)
 
 	client := proxy.GetClient()
 	if client == nil {
@@ -291,6 +291,7 @@ func (a *GeminiToOpenAIAdaptor) convertOpenAIToGemini(openaiResp map[string]any,
 }
 
 // streamGeminiResponse handles Gemini streaming: reads upstream OpenAI SSE, converts to Gemini format.
+//nolint:errcheck
 func (a *GeminiToOpenAIAdaptor) streamGeminiResponse(c *gin.Context, resp *http.Response) error {
 	if resp.StatusCode != http.StatusOK {
 		errBody, _ := io.ReadAll(resp.Body)
@@ -474,6 +475,7 @@ func (a *GeminiToOpenAIAdaptor) convertOpenAIStreamChunkToGemini(openaiResp map[
 }
 
 // sendGeminiStreamEnd sends the final message_delta and message_stop events.
+//nolint:errcheck
 func (a *GeminiToOpenAIAdaptor) sendGeminiStreamEnd(c *gin.Context, state *GeminiStreamState) {
 	if state.SentMessageStop {
 		return
@@ -511,6 +513,7 @@ func (a *GeminiToOpenAIAdaptor) sendGeminiStreamEnd(c *gin.Context, state *Gemin
 }
 
 // stopGeminiOpenBlocks closes any open content blocks.
+//nolint:errcheck
 func (a *GeminiToOpenAIAdaptor) stopGeminiOpenBlocks(c *gin.Context, state *GeminiStreamState) {
 	switch state.LastMessageType {
 	case LastMessageTypeThinking, LastMessageTypeText:
@@ -548,6 +551,7 @@ func (a *GeminiToOpenAIAdaptor) stopGeminiOpenBlocksAndAdvance(c *gin.Context, s
 // Based on new-api streamResponseGeminiChat2OpenAI + cc-switch streaming_gemini.rs.
 // Gemini's streamGenerateContent delivers cumulative snapshots of content.parts,
 // so we need to compute deltas from accumulated state.
+//nolint:errcheck
 func (a *GeminiToOpenAIAdaptor) geminiSseToClaude(c *gin.Context, geminiResp map[string]any, state *GeminiStreamState) {
 	// Extract metadata
 	if id, ok := geminiResp["responseId"].(string); ok && state.MessageID == "" {
@@ -707,6 +711,7 @@ func (a *GeminiToOpenAIAdaptor) geminiSseToClaude(c *gin.Context, geminiResp map
 }
 
 // emitGeminiThinkingDelta emits a thinking content block delta.
+//nolint:errcheck
 func (a *GeminiToOpenAIAdaptor) emitGeminiThinkingDelta(c *gin.Context, content string, state *GeminiStreamState) {
 	if state.LastMessageType != LastMessageTypeThinking {
 		a.stopGeminiOpenBlocksAndAdvance(c, state)
@@ -740,6 +745,7 @@ func (a *GeminiToOpenAIAdaptor) emitGeminiThinkingDelta(c *gin.Context, content 
 }
 
 // emitGeminiTextDelta emits a text content block delta.
+//nolint:errcheck
 func (a *GeminiToOpenAIAdaptor) emitGeminiTextDelta(c *gin.Context, text string, state *GeminiStreamState) {
 	if state.LastMessageType == LastMessageTypeThinking {
 		a.stopGeminiOpenBlocksAndAdvance(c, state)
@@ -775,6 +781,7 @@ func (a *GeminiToOpenAIAdaptor) emitGeminiTextDelta(c *gin.Context, text string,
 }
 
 // handleGeminiToolCalls handles function call parts from Gemini stream.
+//nolint:errcheck
 func (a *GeminiToOpenAIAdaptor) handleGeminiToolCalls(c *gin.Context, toolCalls []map[string]any, state *GeminiStreamState) {
 	state.HasToolUse = true
 

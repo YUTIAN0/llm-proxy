@@ -51,7 +51,7 @@ func (a *OpenAIAdaptor) DoRequest(c *gin.Context, info *RelayInfo, requestBody i
 	if err != nil {
 		return nil, err
 	}
-	a.SetupRequestHeader(&httpReq.Header, info)
+	_ = a.SetupRequestHeader(&httpReq.Header, info)
 
 	client := proxy.GetClient()
 	if client == nil {

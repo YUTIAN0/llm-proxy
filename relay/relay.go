@@ -209,7 +209,7 @@ func RelayHandler(c *gin.Context) {
 		c.Header("Cache-Control", "no-cache")
 		c.Header("Connection", "keep-alive")
 		if s, ok := result.(string); ok {
-			c.Writer.WriteString(s)
+			_, _ = c.Writer.WriteString(s)
 		}
 		logRelayResponse(info, adaptor, httpResp.StatusCode, time.Since(startTime), nil)
 		return
