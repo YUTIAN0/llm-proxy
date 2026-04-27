@@ -37,72 +37,81 @@ func main() {
 	r.POST("/v1/*path", relay.RelayHandler)
 	r.POST("/v1beta/*path", relay.RelayHandler)
 
-	// GET /v1/models - list models with API key-based filtering
-	r.GET("/v1/models", func(c *gin.Context) {
+	// GET /v1/models and GET /v1/models/:model
+	r.GET("/v1/*path", func(c *gin.Context) {
+		fullPath := c.Param("path")
 		clientAPIKey := extractAPIKey(c)
+		if clientAPIKey != "" && !channel.IsKeyRecognized(clientAPIKey) {
+			c.JSON(http.StatusUnauthorized, gin.H{"error": "invalid API key"})
+			return
+		}
 
-		models := channel.GetAllChannelModels()
-		if clientAPIKey != "" {
-			ak, ok := channel.ValidateAPIKey(clientAPIKey)
-			if ok {
-				models = channel.GetAllowedModelsWithAliases(ak)
+		// GET /v1/models - list models
+		if fullPath == "/models" || fullPath == "/models/" {
+			models := channel.GetAllChannelModels()
+			if clientAPIKey != "" {
+				ak, ok := channel.ValidateAPIKey(clientAPIKey)
+				if ok {
+					models = channel.GetAllowedModelsWithAliases(ak)
+				}
+			}
+			data := make([]map[string]any, 0, len(models))
+			for _, m := range models {
+				data = append(data, map[string]any{"id": m, "object": "model"})
+			}
+			c.JSON(http.StatusOK, gin.H{"object": "list", "data": data})
+			return
+		}
+
+		// GET /v1/models/:model - get single model info
+		if strings.HasPrefix(fullPath, "/models/") {
+			modelName := strings.TrimPrefix(fullPath, "/models/")
+			if modelName != "" {
+				resolved := channel.ResolveModelAlias(modelName)
+				result := gin.H{
+					"id":       modelName,
+					"object":   "model",
+					"owned_by": "llm-proxy",
+				}
+				if resolved != modelName {
+					result["alias_for"] = resolved
+				}
+				c.JSON(http.StatusOK, result)
+				return
 			}
 		}
 
-		data := make([]map[string]any, 0, len(models))
-		for _, m := range models {
-			data = append(data, map[string]any{"id": m, "object": "model"})
-		}
-
-		c.JSON(http.StatusOK, gin.H{"object": "list", "data": data})
-	})
-
-	// GET /v1/models/:model - get single model info
-	r.GET("/v1/models/:model", func(c *gin.Context) {
-		modelName := c.Param("model")
-		resolved := channel.ResolveModelAlias(modelName)
-
-		result := gin.H{
-			"id":       modelName,
-			"object":   "model",
-			"owned_by": "llm-proxy",
-		}
-		if resolved != modelName {
-			result["alias_for"] = resolved
-		}
-
-		c.JSON(http.StatusOK, result)
-	})
-
-	// Fallback GET handler
-	r.GET("/v1/*path", func(c *gin.Context) {
 		c.JSON(http.StatusOK, gin.H{"status": "ok"})
 	})
 
 	// GET /v1beta/models - Gemini-style model list
-	r.GET("/v1beta/models", func(c *gin.Context) {
-		clientAPIKey := extractAPIKey(c)
-
-		models := channel.GetAllChannelModels()
-		if clientAPIKey != "" {
-			ak, ok := channel.ValidateAPIKey(clientAPIKey)
-			if ok {
-				models = channel.GetAllowedModelsWithAliases(ak)
-			}
-		}
-
-		modelsList := make([]map[string]any, 0, len(models))
-		for _, m := range models {
-			modelsList = append(modelsList, map[string]any{
-				"name":         fmt.Sprintf("models/%s", m),
-				"display_name": m,
-			})
-		}
-
-		c.JSON(http.StatusOK, gin.H{"models": modelsList})
-	})
-
 	r.GET("/v1beta/*path", func(c *gin.Context) {
+		fullPath := c.Param("path")
+		clientAPIKey := extractAPIKey(c)
+		if clientAPIKey != "" && !channel.IsKeyRecognized(clientAPIKey) {
+			c.JSON(http.StatusUnauthorized, gin.H{"error": "invalid API key"})
+			return
+		}
+
+		if fullPath == "/models" || fullPath == "/models/" {
+			models := channel.GetAllChannelModels()
+			if clientAPIKey != "" {
+				ak, ok := channel.ValidateAPIKey(clientAPIKey)
+				if ok {
+					models = channel.GetAllowedModelsWithAliases(ak)
+				}
+			}
+			modelsList := make([]map[string]any, 0, len(models))
+			for _, m := range models {
+				modelsList = append(modelsList, map[string]any{
+					"name":         fmt.Sprintf("models/%s", m),
+					"display_name": m,
+				})
+			}
+			c.JSON(http.StatusOK, gin.H{"models": modelsList})
+			return
+		}
+
 		c.JSON(http.StatusOK, gin.H{"status": "ok"})
 	})
 
