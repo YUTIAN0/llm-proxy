@@ -443,7 +443,7 @@ func (a *ClaudeToOpenAIAdaptor) DoRequest(c *gin.Context, info *RelayInfo, reque
 	if err != nil {
 		return nil, err
 	}
-	a.SetupRequestHeader(&httpReq.Header, info)
+	_ = a.SetupRequestHeader(&httpReq.Header, info)
 
 	client := proxy.GetClient()
 	if client == nil {
@@ -476,7 +476,7 @@ func (a *ClaudeToOpenAIAdaptor) streamClaudeResponse(c *gin.Context, resp *http.
 			return fmt.Errorf("upstream returned %d", resp.StatusCode)
 		}
 		c.Status(resp.StatusCode)
-		c.Writer.Write(errBody)
+		_, _ = c.Writer.Write(errBody)
 		return fmt.Errorf("upstream returned %d", resp.StatusCode)
 	}
 
@@ -556,6 +556,7 @@ func (a *ClaudeToOpenAIAdaptor) streamClaudeResponse(c *gin.Context, resp *http.
 	return nil
 }
 
+//nolint:errcheck
 func (a *ClaudeToOpenAIAdaptor) sendStreamEnd(c *gin.Context, state *ClaudeStreamState) {
 	if state.SentMessageStop {
 		return
@@ -588,6 +589,7 @@ func (a *ClaudeToOpenAIAdaptor) sendStreamEnd(c *gin.Context, state *ClaudeStrea
 	state.SentMessageStop = true
 }
 
+//nolint:errcheck
 func (a *ClaudeToOpenAIAdaptor) stopOpenBlocks(c *gin.Context, state *ClaudeStreamState) {
 	switch state.LastMessageType {
 	case LastMessageTypeThinking:
@@ -623,6 +625,7 @@ func (a *ClaudeToOpenAIAdaptor) stopOpenBlocksAndAdvance(c *gin.Context, state *
 	state.LastMessageType = LastMessageTypeNone
 }
 
+//nolint:errcheck
 func (a *ClaudeToOpenAIAdaptor) openaiSseToClaudeWithState(c *gin.Context, sseEvent map[string]any, state *ClaudeStreamState) {
 	if state.MessageID == "" {
 		if id, ok := sseEvent["id"].(string); ok {
@@ -738,6 +741,7 @@ func (a *ClaudeToOpenAIAdaptor) openaiSseToClaudeWithState(c *gin.Context, sseEv
 	}
 }
 
+//nolint:errcheck
 func (a *ClaudeToOpenAIAdaptor) handleToolCalls(c *gin.Context, toolCalls []any, state *ClaudeStreamState) {
 	if state.LastMessageType != LastMessageTypeTools {
 		a.stopOpenBlocksAndAdvance(c, state)
@@ -808,6 +812,7 @@ func (a *ClaudeToOpenAIAdaptor) handleToolCalls(c *gin.Context, toolCalls []any,
 	state.Index = state.ToolCallBaseIndex + state.ToolCallMaxOffset
 }
 
+//nolint:errcheck
 func (a *ClaudeToOpenAIAdaptor) handleThinkingContent(c *gin.Context, content string, state *ClaudeStreamState) {
 	if state.LastMessageType != LastMessageTypeThinking {
 		a.stopOpenBlocksAndAdvance(c, state)
@@ -894,6 +899,7 @@ func (a *ClaudeToOpenAIAdaptor) handleTextContent(c *gin.Context, text string, s
 	}
 }
 
+//nolint:errcheck
 func (a *ClaudeToOpenAIAdaptor) emitThinkingDelta(c *gin.Context, content string, state *ClaudeStreamState) {
 	if state.LastMessageType != LastMessageTypeThinking {
 		a.stopOpenBlocksAndAdvance(c, state)
