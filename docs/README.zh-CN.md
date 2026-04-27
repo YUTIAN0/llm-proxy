@@ -1,0 +1,215 @@
+# llm-proxy
+
+轻量级 LLM API 代理，支持在 OpenAI、Claude、Gemini 不同 API 格式之间进行转换。
+
+## 功能特性
+
+- **多格式转换**: OpenAI ↔ Claude Messages API ↔ Google Gemini
+- **模型别名**: 将任意模型名映射到上游模型（如 `claude-sonnet-4-6` → `Qwen3-32B`）
+- **API Key 管理**: 每个 Key 独立配置允许/拒绝的模型列表
+- **模型路由**: 根据不同模型路由到不同的上游渠道
+- **流式支持**: SSE 流式输出，实时格式转换
+- **思考标签**: 自动处理 `<think>` / `</think>` 推理模型标签
+- **多渠道**: 支持多个上游渠道，可 pass-through 或代理模式
+- **HTTP 代理**: 可选 SOCKS5 代理支持
+
+## 快速开始
+
+```bash
+go build -o llm-proxy && ./llm-proxy --config config.yaml
+```
+
+## 配置文件说明
+
+```yaml
+server:
+  port: 8080              # 监听端口
+  tls:
+    cert: /path/to/cert.pem
+    key: /path/to/key.pem  # HTTPS 证书（可选）
+
+channels:
+  - name: "primary"
+    api_key: "sk-xxx"      # 上游 API Key
+    base_url: "https://api.upstream.com"
+    format: "openai"       # openai | claude | gemini | gemini_to_openai | openai_to_gemini
+    models:
+      - "model-a"
+      - "model-b"
+    headers:               # 自定义请求头（可选）
+      "X-Custom-Header": "custom-value"
+
+default_channel: "primary"  # 默认上游渠道
+
+# 模型别名映射
+model_aliases:
+  "claude-sonnet-4-6": "model-a"
+  "gpt-4o": "model-b"
+
+# API Key 配置
+api_keys:
+  - key: "sk-user-1"
+    name: "user-1"         # 日志展示用名称
+    # 允许的模型（留空表示全部允许）
+    allowed:
+      - "claude-sonnet-4-6"
+    # 拒绝的模型
+    denied: []
+    # 模型路由：根据模型名将请求路由到不同渠道
+    channels:
+      "claude-*": ["primary"]
+      "gpt-3.5-*": ["backup"]
+
+# SOCKS5 代理（可选）
+proxy:
+  enabled: true
+  type: "socks5"
+  addr: "127.0.0.1:1080"
+  username: ""
+  password: ""
+```
+
+### 配置字段说明
+
+| 字段 | 说明 |
+|------|------|
+| `server.port` | 服务监听端口，默认 8080 |
+| `channels` | 上游渠道列表，每个渠道指定 API Key、地址、格式和模型 |
+| `default_channel` | 未匹配到 API Key 时使用的默认渠道 |
+| `model_aliases` | 模型别名映射，客户端用别名请求，代理自动转为上游真实模型 |
+| `api_keys[].key` | 客户端使用的 API Key |
+| `api_keys[].allowed` | 允许使用的模型列表，留空表示无限制 |
+| `api_keys[].denied` | 禁止使用的模型列表 |
+| `api_keys[].channels` | 模型到渠道的路由映射，支持 `*` 通配符（如 `claude-*`） |
+| `proxy.enabled` | 是否启用 SOCKS5 代理 |
+
+## API 使用
+
+### 对话补全
+
+```bash
+# OpenAI 格式
+curl -X POST http://localhost:8080/v1/chat/completions \
+  -H "Content-Type: application/json" \
+  -H "Authorization: Bearer sk-user-1" \
+  -d '{
+    "model": "claude-sonnet-4-6",
+    "messages": [{"role": "user", "content": "Hello"}],
+    "stream": true
+  }'
+```
+
+### 获取模型列表
+
+```bash
+# 获取所有模型
+curl http://localhost:8080/v1/models
+
+# 按 API Key 过滤
+curl -H "Authorization: Bearer sk-user-1" http://localhost:8080/v1/models
+
+# 获取单个模型信息（含别名解析）
+curl http://localhost:8080/v1/models/claude-sonnet-4-6
+# 返回: {"id":"claude-sonnet-4-6","object":"model","owned_by":"llm-proxy","alias_for":"model-a"}
+```
+
+### 路由选择顺序
+
+代理按以下优先级选择上游渠道：
+
+1. `X-Channel` 请求头 — 指定渠道名称
+2. `X-Target-Format` 请求头 — 指定渠道格式
+3. `Authorization` / `X-API-Key` 请求头 — 通过 API Key 路由
+4. `default_channel` — 默认渠道
+
+### 支持的 API Key 请求头
+
+| 请求头 | 说明 |
+|--------|------|
+| `Authorization: Bearer <key>` | 标准 OpenAI 格式 |
+| `X-API-Key: <key>` | 通用格式 |
+| `x-goog-api-key: <key>` | Gemini 格式 |
+
+## 格式转换支持
+
+| 客户端格式 | 上游格式 | 方向 |
+|---|---|---|
+| Claude Messages | OpenAI | Claude → OpenAI |
+| Gemini | OpenAI | Gemini → OpenAI |
+| OpenAI | Gemini | OpenAI → Gemini |
+| OpenAI | OpenAI | 透传 |
+
+### Claude 格式支持
+
+- `text` / `image` / `tool_use` / `tool_result` 内容类型
+- 系统提示（字符串和数组形式）
+- 流式事件：`message_start`、`content_block_start`、`content_block_delta`、`content_block_stop`、`message_delta`、`message_stop`
+- 思考标签（`thinking`）自动识别和转换
+
+### Gemini 格式支持
+
+- `contents` / `systemInstruction` 消息格式
+- `functionCall` / `functionResponse` 工具调用
+- `thought` 思考内容
+- 流式响应转换为 Gemini 格式
+
+## 构建
+
+```bash
+# 静态编译
+CGO_ENABLED=0 go build -trimpath -ldflags="-s -w -buildid=" -o llm-proxy
+```
+
+## 部署
+
+```bash
+# 使用配置文件
+./llm-proxy --config config.yaml
+
+# 指定端口
+./llm-proxy --config config.yaml  # 在 config.yaml 中配置 port
+```
+
+## 使用场景
+
+### 场景 1：统一上游访问多个客户端工具
+
+使用 Claude CLI / Gemini CLI 访问任意 OpenAI 格式的上游服务：
+
+```bash
+export ANTHROPIC_BASE_URL=http://your-proxy:8080/v1
+export ANTHROPIC_AUTH_TOKEN=sk-claude-user-1
+claude -p "hello" --model claude-sonnet-4-6
+```
+
+### 场景 2：多用户多模型授权
+
+为不同用户配置不同的模型访问权限：
+
+```yaml
+api_keys:
+  - key: "sk-team-dev"
+    name: "开发团队"
+    allowed:
+      - "claude-sonnet-4-6"
+      - "gpt-4o"
+
+  - key: "sk-team-test"
+    name: "测试团队"
+    allowed:
+      - "gpt-3.5-turbo"
+    denied:
+      - "claude-opus-4-7"
+```
+
+### 场景 3：模型路由到不同渠道
+
+根据模型名将请求路由到不同的上游：
+
+```yaml
+api_keys:
+  - key: "sk-user-1"
+    channels:
+      "claude-*": ["claude-channel"]
+      "gpt-*": ["openai-channel"]
+```
