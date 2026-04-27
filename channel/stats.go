@@ -4,6 +4,7 @@ import (
 	"fmt"
 	"log"
 	"sort"
+	"strings"
 	"sync"
 	"sync/atomic"
 	"time"
@@ -19,11 +20,11 @@ type ModelStat struct {
 }
 
 type KeyStat struct {
-	Name         string
+	Name       string
 	InputTokens  int64
 	OutputTokens int64
-	Requests     int64
-	ModelStats   map[string]*ModelStat
+	Requests   int64
+	ModelStats map[string]*ModelStat
 }
 
 type StatsManager struct {
@@ -125,19 +126,29 @@ func (sm *StatsManager) printAndReset() {
 		return
 	}
 
-	var triggers []string
+	var trigger string
 	if sm.interval > 0 {
-		triggers = append(triggers, fmt.Sprintf("interval:%s", sm.interval))
+		trigger = fmt.Sprintf("interval:%s", sm.interval)
 	}
 	if sm.countTrigger > 0 {
-		triggers = append(triggers, fmt.Sprintf("request_count:%d", sm.countTrigger))
+		if trigger != "" {
+			trigger += " + "
+		}
+		trigger += fmt.Sprintf("request_count:%d", sm.countTrigger)
+	}
+	if trigger == "" {
+		trigger = "manual"
 	}
 
-	trigger := "manual"
-	if len(triggers) > 0 {
-		trigger = triggers[0]
+	// Collect rows
+	type row struct {
+		key    string
+		model  string
+		reqs   int64
+		inTok  int64
+		outTok int64
 	}
-
+	var rows []row
 	var totalInput, totalOutput, totalReqs int64
 
 	sortKeys := make([]string, 0, len(sm.keyStats))
@@ -146,12 +157,9 @@ func (sm *StatsManager) printAndReset() {
 	}
 	sort.Strings(sortKeys)
 
-	log.Printf("[stats] === %s ===", trigger)
-
 	for _, name := range sortKeys {
 		s := sm.keyStats[name]
-		log.Printf("[stats]   api_key:%-20s | requests=%6d | input_tokens=%10d | output_tokens=%10d",
-			s.Name, s.Requests, s.InputTokens, s.OutputTokens)
+		rows = append(rows, row{key: s.Name, reqs: s.Requests, inTok: s.InputTokens, outTok: s.OutputTokens})
 
 		if len(s.ModelStats) > 0 {
 			modelKeys := make([]string, 0, len(s.ModelStats))
@@ -162,8 +170,7 @@ func (sm *StatsManager) printAndReset() {
 
 			for _, m := range modelKeys {
 				ms := s.ModelStats[m]
-				log.Printf("[stats]     model:%-25s | requests=%6d | input_tokens=%10d | output_tokens=%10d",
-					ms.Model, ms.Requests, ms.InputTokens, ms.OutputTokens)
+				rows = append(rows, row{model: ms.Model, reqs: ms.Requests, inTok: ms.InputTokens, outTok: ms.OutputTokens})
 			}
 		}
 
@@ -172,8 +179,51 @@ func (sm *StatsManager) printAndReset() {
 		totalReqs += s.Requests
 	}
 
-	log.Printf("[stats]   %-23s | requests=%6d | input_tokens=%10d | output_tokens=%10d",
-		"(total)", totalReqs, totalInput, totalOutput)
+	// Calculate column widths
+	maxKey := 20
+	maxModel := 25
+	for _, r := range rows {
+		if r.key != "" {
+			l := len(fmt.Sprintf("api_key:%s", r.key))
+			if l > maxKey {
+				maxKey = l
+			}
+		}
+		if r.model != "" {
+			l := len(fmt.Sprintf("model:%s", r.model))
+			if l > maxModel {
+				maxModel = l
+			}
+		}
+	}
+
+	// Build table
+	b := &strings.Builder{}
+	b.WriteString(fmt.Sprintf("\n[stats] === %s ===\n", trigger))
+
+	border := fmt.Sprintf("[stats] +-%-*+-%-*+--------+------------+-------------+\n", maxKey, maxModel)
+	b.WriteString(border)
+	b.WriteString(fmt.Sprintf("[stats] |-%-*|-%-*| %6s | %10s | %11s |\n",
+		maxKey, maxModel, "reqs", "in", "out"))
+	b.WriteString(border)
+
+	for _, r := range rows {
+		if r.key != "" {
+			b.WriteString(fmt.Sprintf("[stats] |%-*s| %-*s | %6d | %10d | %11d |\n",
+				maxKey, "api_key:"+r.key, maxModel, "", r.reqs, r.inTok, r.outTok))
+		} else {
+			b.WriteString(fmt.Sprintf("[stats] | %-*s| %-*s | %6d | %10d | %11d |\n",
+				maxKey, "", maxModel, "model:"+r.model, r.reqs, r.inTok, r.outTok))
+		}
+	}
+
+	b.WriteString(border)
+	b.WriteString(fmt.Sprintf("[stats] | %-*s| %-*s | %6d | %10d | %11d |\n",
+		maxKey, "(total)", maxModel, "", totalReqs, totalInput, totalOutput))
+	b.WriteString(border)
+	b.WriteString("\n")
+
+	log.Print(b.String())
 
 	// Reset
 	sm.keyStats = make(map[string]*KeyStat)
