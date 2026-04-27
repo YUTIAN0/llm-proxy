@@ -177,7 +177,7 @@ func RelayHandler(c *gin.Context) {
 			c.JSON(http.StatusBadGateway, gin.H{"error": streamErr.Error()})
 		}
 		logRelayResponse(info, adaptor, httpResp.StatusCode, time.Since(startTime), nil)
-		channel.RecordStats(info.ClientAPIKeyName, info.InputTokens, info.OutputTokens)
+		channel.RecordStats(info.ClientAPIKeyName, info.OriginModel, info.InputTokens, info.OutputTokens)
 		return
 	}
 
@@ -187,7 +187,7 @@ func RelayHandler(c *gin.Context) {
 			c.JSON(http.StatusBadGateway, gin.H{"error": streamErr.Error()})
 		}
 		logRelayResponse(info, adaptor, httpResp.StatusCode, time.Since(startTime), nil)
-		channel.RecordStats(info.ClientAPIKeyName, info.InputTokens, info.OutputTokens)
+		channel.RecordStats(info.ClientAPIKeyName, info.OriginModel, info.InputTokens, info.OutputTokens)
 		return
 	}
 
@@ -197,7 +197,7 @@ func RelayHandler(c *gin.Context) {
 			c.JSON(http.StatusBadGateway, gin.H{"error": streamErr.Error()})
 		}
 		logRelayResponse(info, adaptor, httpResp.StatusCode, time.Since(startTime), nil)
-		channel.RecordStats(info.ClientAPIKeyName, info.InputTokens, info.OutputTokens)
+		channel.RecordStats(info.ClientAPIKeyName, info.OriginModel, info.InputTokens, info.OutputTokens)
 		return
 	}
 
@@ -215,7 +215,7 @@ func RelayHandler(c *gin.Context) {
 			_, _ = c.Writer.WriteString(s)
 		}
 		logRelayResponse(info, adaptor, httpResp.StatusCode, time.Since(startTime), nil)
-		channel.RecordStats(info.ClientAPIKeyName, info.InputTokens, info.OutputTokens)
+		channel.RecordStats(info.ClientAPIKeyName, info.OriginModel, info.InputTokens, info.OutputTokens)
 		return
 	}
 
@@ -245,6 +245,6 @@ func RelayHandler(c *gin.Context) {
 	}
 
 	logRelayResponse(info, adaptor, httpResp.StatusCode, time.Since(startTime), nil)
-	channel.RecordStats(info.ClientAPIKeyName, info.InputTokens, info.OutputTokens)
+	channel.RecordStats(info.ClientAPIKeyName, info.OriginModel, info.InputTokens, info.OutputTokens)
 	c.JSON(httpResp.StatusCode, result)
 }

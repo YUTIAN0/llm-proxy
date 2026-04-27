@@ -11,11 +11,19 @@ import (
 	"github.com/llm-proxy/config"
 )
 
+type ModelStat struct {
+	Model        string
+	InputTokens  int64
+	OutputTokens int64
+	Requests     int64
+}
+
 type KeyStat struct {
 	Name         string
 	InputTokens  int64
 	OutputTokens int64
 	Requests     int64
+	ModelStats   map[string]*ModelStat
 }
 
 type StatsManager struct {
@@ -54,7 +62,7 @@ func InitStats(cfg config.StatsConfig) {
 	}
 }
 
-func RecordStats(keyName string, inputTokens, outputTokens int) {
+func RecordStats(keyName, model string, inputTokens, outputTokens int) {
 	if statsManager == nil {
 		return
 	}
@@ -64,16 +72,28 @@ func RecordStats(keyName string, inputTokens, outputTokens int) {
 	if keyName == "" {
 		keyName = "(anonymous)"
 	}
+	if model == "" {
+		model = "(unknown)"
+	}
 
 	sm.mu.Lock()
 	stat, ok := sm.keyStats[keyName]
 	if !ok {
-		stat = &KeyStat{Name: keyName}
+		stat = &KeyStat{Name: keyName, ModelStats: make(map[string]*ModelStat)}
 		sm.keyStats[keyName] = stat
 	}
 	stat.InputTokens += int64(inputTokens)
 	stat.OutputTokens += int64(outputTokens)
 	stat.Requests++
+
+	ms, ok := stat.ModelStats[model]
+	if !ok {
+		ms = &ModelStat{Model: model}
+		stat.ModelStats[model] = ms
+	}
+	ms.InputTokens += int64(inputTokens)
+	ms.OutputTokens += int64(outputTokens)
+	ms.Requests++
 	sm.mu.Unlock()
 
 	newTotal := atomic.AddInt64(&sm.totalRequests, 1)
@@ -132,6 +152,21 @@ func (sm *StatsManager) printAndReset() {
 		s := sm.keyStats[name]
 		log.Printf("[stats]   api_key:%-20s | requests=%6d | input_tokens=%10d | output_tokens=%10d",
 			s.Name, s.Requests, s.InputTokens, s.OutputTokens)
+
+		if len(s.ModelStats) > 0 {
+			modelKeys := make([]string, 0, len(s.ModelStats))
+			for m := range s.ModelStats {
+				modelKeys = append(modelKeys, m)
+			}
+			sort.Strings(modelKeys)
+
+			for _, m := range modelKeys {
+				ms := s.ModelStats[m]
+				log.Printf("[stats]     model:%-25s | requests=%6d | input_tokens=%10d | output_tokens=%10d",
+					ms.Model, ms.Requests, ms.InputTokens, ms.OutputTokens)
+			}
+		}
+
 		totalInput += s.InputTokens
 		totalOutput += s.OutputTokens
 		totalReqs += s.Requests

@@ -95,6 +95,7 @@ func (a *OpenAIToGeminiAdaptor) DoResponse(c *gin.Context, resp *http.Response, 
 	return ResponseGeminiChat2OpenAI(geminiResp, info.OriginModel), nil
 }
 
+//nolint:errcheck
 func (a *OpenAIToGeminiAdaptor) streamGeminiToOpenAI(c *gin.Context, resp *http.Response, info *RelayInfo) error {
 	if resp.StatusCode != http.StatusOK {
 		errBody, _ := io.ReadAll(resp.Body)
