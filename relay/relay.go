@@ -62,6 +62,13 @@ func RelayHandler(c *gin.Context) {
 	if clientAPIKey == "" {
 		clientAPIKey = strings.TrimPrefix(c.GetHeader("Authorization"), "Bearer ")
 	}
+	// Gemini API uses x-goog-api-key header
+	if clientAPIKey == "" {
+		clientAPIKey = c.GetHeader("X-Goog-Api-Key")
+	}
+	if clientAPIKey == "" {
+		clientAPIKey = c.GetHeader("x-goog-api-key")
+	}
 	info.ClientAPIKey = clientAPIKey
 
 	var bodyModel string
@@ -95,6 +102,7 @@ func RelayHandler(c *gin.Context) {
 		}
 	}
 
+	// Resolve API key config and model-based routing
 	if ch != nil {
 		resolvedCh, akCfg, akName := channel.ResolveAPIKey(clientAPIKey, bodyModel)
 		if resolvedCh != nil {
@@ -122,6 +130,13 @@ func RelayHandler(c *gin.Context) {
 	// DEBUG: log routing decisions
 	debugLog("[ROUTING] channel=%s, format=%s, model=%s, is_stream=%v, origin_model=%s, upstream_model=%s",
 		info.ChannelName, info.Format, bodyModel, info.IsStream, info.OriginModel, info.UpstreamModel)
+
+	// Validate API key - if an API key was provided, it must be recognized
+	// (either a configured api_keys entry or a channel's upstream key)
+	if clientAPIKey != "" && !channel.IsKeyRecognized(clientAPIKey) {
+		c.JSON(http.StatusUnauthorized, gin.H{"error": "invalid API key"})
+		return
+	}
 
 	adaptor := GetAdaptorByFormat(info.Format, mode)
 

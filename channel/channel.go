@@ -189,3 +189,142 @@ func ResolveModelAlias(model string) string {
 	}
 	return model
 }
+
+// IsKeyRecognized returns true if the API key matches either a configured
+// api_keys entry or any channel's upstream API key (pass-through mode).
+// Empty keys are not recognized.
+func IsKeyRecognized(apiKey string) bool {
+	if apiKey == "" {
+		return false
+	}
+	manager.mu.RLock()
+	defer manager.mu.RUnlock()
+	if _, ok := manager.apiKeys[apiKey]; ok {
+		return true
+	}
+	for _, ch := range manager.channels {
+		if ch.APIKey == apiKey {
+			return true
+		}
+	}
+	return false
+}
+
+// ValidateAPIKey returns true if the API key is configured in api_keys section.
+func ValidateAPIKey(apiKey string) (*config.APIKeyConfig, bool) {
+	if apiKey == "" {
+		return nil, false
+	}
+	manager.mu.RLock()
+	defer manager.mu.RUnlock()
+	ak, ok := manager.apiKeys[apiKey]
+	if !ok {
+		return nil, false
+	}
+	return ak, true
+}
+
+// GetAllowedModels returns the list of model names an API key is allowed to use.
+// If allowed list is empty (full-access), returns all alias + channel models.
+// Also includes aliases that resolve to allowed channel models.
+func GetAllowedModels(ak *config.APIKeyConfig) []string {
+	manager.mu.RLock()
+	defer manager.mu.RUnlock()
+
+	// If no allowed list, return all known models
+	if len(ak.Allowed) == 0 {
+		all := make(map[string]bool)
+		// Add all alias keys
+		if manager.cfg.ModelAliases != nil {
+			for k := range manager.cfg.ModelAliases {
+				all[k] = true
+			}
+		}
+		// Add all channel models
+		for _, ch := range manager.channels {
+			for _, m := range ch.Models {
+				all[m] = true
+			}
+		}
+		result := make([]string, 0, len(all))
+		for k := range all {
+			result = append(result, k)
+		}
+		return result
+	}
+
+	// Return explicitly allowed models
+	return ak.Allowed
+}
+
+// GetAllowedModelsWithAliases returns allowed models plus any aliases that resolve to upstream models in allowed channels.
+func GetAllowedModelsWithAliases(ak *config.APIKeyConfig) []string {
+	allowed := GetAllowedModels(ak)
+	if len(allowed) == 0 {
+		return allowed
+	}
+
+	allowedSet := make(map[string]bool)
+	for _, m := range allowed {
+		allowedSet[m] = true
+	}
+
+	manager.mu.RLock()
+	defer manager.mu.RUnlock()
+
+	// Add any alias that resolves to an allowed model
+	if manager.cfg.ModelAliases != nil {
+		for aliasKey, aliasVal := range manager.cfg.ModelAliases {
+			if aliasVal == "" {
+				continue
+			}
+			// If the alias name itself is not in allowed but resolves to a channel model that IS in allowed
+			if !allowedSet[aliasKey] {
+				// Check if the resolved value is in allowed set or matches a channel model
+				if allowedSet[aliasVal] {
+					allowedSet[aliasKey] = true
+				}
+			}
+		}
+	}
+
+	result := make([]string, 0, len(allowedSet))
+	for k := range allowedSet {
+		result = append(result, k)
+	}
+	return result
+}
+
+// GetAllChannelModels returns all models across all channels.
+func GetAllChannelModels() []string {
+	manager.mu.RLock()
+	defer manager.mu.RUnlock()
+	all := make(map[string]bool)
+	for _, ch := range manager.channels {
+		for _, m := range ch.Models {
+			all[m] = true
+		}
+	}
+	// Add aliases
+	if manager.cfg.ModelAliases != nil {
+		for k := range manager.cfg.ModelAliases {
+			all[k] = true
+		}
+	}
+	result := make([]string, 0, len(all))
+	for k := range all {
+		result = append(result, k)
+	}
+	return result
+}
+
+// GetAllAPIKeys returns all configured API key strings.
+func GetAllAPIKeys() []string {
+	manager.mu.RLock()
+	defer manager.mu.RUnlock()
+	keys := make([]string, 0, len(manager.apiKeys))
+	for k := range manager.apiKeys {
+		keys = append(keys, k)
+	}
+	return keys
+}

@@ -13,6 +13,7 @@ type Config struct {
 	ModelAliases   map[string]string `yaml:"model_aliases"`
 	APIKeys        []APIKeyConfig  `yaml:"api_keys"`
 	Proxy          ProxyConfig     `yaml:"proxy"`
+	RequireValidKey bool          `yaml:"require_valid_key"` // if true, reject requests with unconfigured API keys
 }
 
 type ServerConfig struct {
