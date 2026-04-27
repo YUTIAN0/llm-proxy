@@ -14,6 +14,7 @@
 - **思考标签**: 自动处理 `<think>` / `</think>` 推理模型标签
 - **多渠道**: 支持多个上游渠道，可 pass-through 或代理模式
 - **HTTP 代理**: 可选 SOCKS5 代理支持
+- **Token 统计**: 按 API Key 统计输入输出 token，支持定时或按请求次数输出
 
 ## 快速开始
 
@@ -67,8 +68,12 @@ proxy:
   enabled: true
   type: "socks5"
   addr: "127.0.0.1:1080"
-  username: ""
-  password: ""
+
+# Token 用量统计
+stats:
+  enabled: true
+  interval: "5m"
+  request_count: 100
 ```
 
 ### 配置字段说明
@@ -80,10 +85,14 @@ proxy:
 | `default_channel` | 未匹配到 API Key 时使用的默认渠道 |
 | `model_aliases` | 模型别名映射，客户端用别名请求，代理自动转为上游真实模型 |
 | `api_keys[].key` | 客户端使用的 API Key |
+| `api_keys[].name` | 日志展示名称 |
 | `api_keys[].allowed` | 允许使用的模型列表，留空表示无限制 |
 | `api_keys[].denied` | 禁止使用的模型列表 |
 | `api_keys[].channels` | 模型到渠道的路由映射，支持 `*` 通配符（如 `claude-*`） |
 | `proxy.enabled` | 是否启用 SOCKS5 代理 |
+| `stats.enabled` | 是否启用 token 统计 |
+| `stats.interval` | 定时输出统计（如 `"5m"`、`"1h"`） |
+| `stats.request_count` | 每 N 次请求输出统计（0 = 不启用） |
 
 ## API 使用
 
@@ -155,6 +164,28 @@ curl http://localhost:8080/v1/models/claude-sonnet-4-6
 - `thought` 思考内容
 - 流式响应转换为 Gemini 格式
 
+## Token 统计
+
+按 API Key 统计输入输出 token，支持两种触发方式（可独立配置）：
+
+```yaml
+stats:
+  enabled: true
+  interval: "5m"        # 每 5 分钟输出一次统计
+  request_count: 100    # 每 100 次请求输出一次统计
+```
+
+输出示例：
+
+```
+[stats] === interval:5m0s ===
+[stats]   api_key:claude-user          | requests=     5 | input_tokens=        55 | output_tokens=       250
+[stats]   api_key:openai-user          | requests=     2 | input_tokens=        22 | output_tokens=       100
+[stats]   (total)                 | requests=     7 | input_tokens=        77 | output_tokens=       350
+```
+
+未携带 API Key 的请求统一归类为 `(anonymous)`。
+
 ## 构建
 
 ```bash
@@ -165,11 +196,7 @@ CGO_ENABLED=0 go build -trimpath -ldflags="-s -w -buildid=" -o llm-proxy
 ## 部署
 
 ```bash
-# 使用配置文件
 ./llm-proxy --config config.yaml
-
-# 指定端口
-./llm-proxy --config config.yaml  # 在 config.yaml 中配置 port
 ```
 
 ## 使用场景
