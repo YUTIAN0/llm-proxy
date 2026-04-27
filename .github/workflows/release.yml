@@ -16,14 +16,19 @@ jobs:
         include:
           - goos: linux
             goarch: amd64
+            ext: ""
           - goos: linux
             goarch: arm64
+            ext: ""
           - goos: darwin
             goarch: amd64
+            ext: ""
           - goos: darwin
             goarch: arm64
+            ext: ""
           - goos: windows
             goarch: amd64
+            ext: ".exe"
     steps:
       - uses: actions/checkout@v4
         with:
@@ -35,19 +40,16 @@ jobs:
           cache: true
 
       - name: Build static binary
-        run: go build -trimpath -ldflags="-s -w -buildid=" -o llm-proxy-${GOOS}-${GOARCH}
+        run: |
+          go build -trimpath -ldflags="-s -w -buildid=" -o "llm-proxy-${GOOS}-${GOARCH}${ext}"
+          tar czf "llm-proxy-${GOOS}-${GOARCH}${ext}.tar.gz" "llm-proxy-${GOOS}-${GOARCH}${ext}"
         env:
           CGO_ENABLED: 0
           GOOS: ${{ matrix.goos }}
           GOARCH: ${{ matrix.goarch }}
-
-      - name: Archive
-        run: tar czf llm-proxy-${GOOS}-${GOARCH}.tar.gz llm-proxy-${GOOS}-${GOARCH}
-        env:
-          GOOS: ${{ matrix.goos }}
-          GOARCH: ${{ matrix.goarch }}
+          ext: ${{ matrix.ext }}
 
       - name: Upload release assets
         uses: softprops/action-gh-release@v2
         with:
-          files: llm-proxy-${{ matrix.goos }}-${{ matrix.goarch }}.tar.gz
+          files: llm-proxy-${{ matrix.goos }}-${{ matrix.goarch }}${{ matrix.ext }}.tar.gz
