@@ -2,6 +2,8 @@
 
 Lightweight LLM API proxy that converts between OpenAI, Claude, and Gemini API formats.
 
+[English](README.md) | [中文](docs/README.zh-CN.md)
+
 ## Features
 
 - **Multi-format conversion**: OpenAI ↔ Claude Messages API ↔ Google Gemini

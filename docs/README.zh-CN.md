@@ -1,5 +1,7 @@
 # llm-proxy
 
+[English](../README.md) | [中文](README.zh-CN.md)
+
 轻量级 LLM API 代理，支持在 OpenAI、Claude、Gemini 不同 API 格式之间进行转换。
 
 ## 功能特性
