@@ -74,7 +74,7 @@ func (a *OpenAIAdaptor) DoResponse(c *gin.Context, resp *http.Response, info *Re
 	if info.IsStream {
 		return string(body), nil
 	}
-	json.Unmarshal(body, &result)
+		_ = json.Unmarshal(body, &result)
 	return result, nil
 }
 

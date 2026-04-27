@@ -933,6 +933,7 @@ func (a *ClaudeToOpenAIAdaptor) emitThinkingDelta(c *gin.Context, content string
 	logClientSSE("content_block_delta", deltaData)
 }
 
+//nolint:errcheck
 func (a *ClaudeToOpenAIAdaptor) emitTextDelta(c *gin.Context, text string, state *ClaudeStreamState) {
 	if state.LastMessageType == LastMessageTypeThinking {
 		a.stopOpenBlocksAndAdvance(c, state)

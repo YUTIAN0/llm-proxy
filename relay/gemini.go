@@ -61,7 +61,7 @@ func CovertOpenAI2Gemini(openaiReq *dto.OpenAIChatRequest) (map[string]any, erro
 	geminiReq["safetySettings"] = safetySettings
 
 	// Tools
-	if openaiReq.Tools != nil && len(openaiReq.Tools) > 0 {
+	if len(openaiReq.Tools) > 0 {
 		functions := make([]map[string]any, 0)
 		for _, tool := range openaiReq.Tools {
 			if tool.Function == nil {
@@ -164,7 +164,7 @@ func convertOpenAIMessageToGeminiParts(msg dto.OpenAIMessage, role string) []map
 		for _, tc := range msg.ToolCalls {
 			args := map[string]any{}
 			if tc.Function.Arguments != "" {
-				json.Unmarshal([]byte(tc.Function.Arguments), &args)
+				_ = json.Unmarshal([]byte(tc.Function.Arguments), &args)
 			}
 			parts = append(parts, map[string]any{
 				"functionCall": map[string]any{

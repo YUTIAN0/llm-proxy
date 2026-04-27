@@ -160,7 +160,7 @@ func RelayHandler(c *gin.Context) {
 	if len(debugUpstreamBody) > 1000 {
 		debugUpstreamBody = debugUpstreamBody[:1000] + "..."
 	}
-	debugLog("[UPSTREAM REQUEST] url=%s, body=%s", info.BaseURL+"/v1/chat/completions", debugBody)
+	debugLog("[UPSTREAM REQUEST] url=%s, body=%s", info.BaseURL+"/v1/chat/completions", debugUpstreamBody)
 	reader := bytes.NewReader(reqJSON)
 
 	resp, err := adaptor.DoRequest(c, info, reader)
