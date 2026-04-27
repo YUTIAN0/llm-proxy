@@ -95,8 +95,7 @@ func (a *OpenAIToGeminiAdaptor) DoResponse(c *gin.Context, resp *http.Response, 
 	return ResponseGeminiChat2OpenAI(geminiResp, info.OriginModel), nil
 }
 
-//nolint:errcheck
-func (a *OpenAIToGeminiAdaptor) streamGeminiToOpenAI(c *gin.Context, resp *http.Response) error {
+func (a *OpenAIToGeminiAdaptor) streamGeminiToOpenAI(c *gin.Context, resp *http.Response, info *RelayInfo) error {
 	if resp.StatusCode != http.StatusOK {
 		errBody, _ := io.ReadAll(resp.Body)
 		log.Printf("[relay] upstream gemini stream error: status=%d body=%s", resp.StatusCode, string(errBody))
@@ -118,6 +117,8 @@ func (a *OpenAIToGeminiAdaptor) streamGeminiToOpenAI(c *gin.Context, resp *http.
 	var utf8Remainder []byte
 	scanner := bufio.NewScanner(resp.Body)
 	scanner.Buffer(make([]byte, 0, 64*1024), 1024*1024)
+	inputTokens := 0
+	outputTokens := 0
 
 	for scanner.Scan() {
 		line := scanner.Bytes()
@@ -152,6 +153,16 @@ func (a *OpenAIToGeminiAdaptor) streamGeminiToOpenAI(c *gin.Context, resp *http.
 
 		result, isStop := StreamResponseGeminiChat2OpenAI(geminiResp)
 
+		// Extract usage from Gemini response
+		if usage, ok := geminiResp["usageMetadata"].(map[string]any); ok {
+			if pt, ok := usage["promptTokenCount"].(float64); ok {
+				inputTokens = int(pt)
+			}
+			if ct, ok := usage["candidatesTokenCount"].(float64); ok {
+				outputTokens = int(ct)
+			}
+		}
+
 		// Add id and model
 		result["id"] = "chatcmpl-gemini"
 		result["model"] = "gemini"
@@ -173,8 +184,10 @@ func (a *OpenAIToGeminiAdaptor) streamGeminiToOpenAI(c *gin.Context, resp *http.
 	}
 
 	// Send [DONE] if not already sent
-	c.Writer.WriteString("data: [DONE]\n\n")
+	_, _ = c.Writer.WriteString("data: [DONE]\n\n")
 	flusher.Flush()
+	info.InputTokens = inputTokens
+	info.OutputTokens = outputTokens
 	return nil
 }
 

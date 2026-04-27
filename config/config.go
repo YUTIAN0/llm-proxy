@@ -14,6 +14,7 @@ type Config struct {
 	APIKeys        []APIKeyConfig  `yaml:"api_keys"`
 	Proxy          ProxyConfig     `yaml:"proxy"`
 	RequireValidKey bool          `yaml:"require_valid_key"` // if true, reject requests with unconfigured API keys
+	Stats          StatsConfig     `yaml:"stats"`
 }
 
 type ServerConfig struct {
@@ -44,11 +45,17 @@ type APIKeyConfig struct {
 }
 
 type ProxyConfig struct {
-	Enabled bool   `yaml:"enabled"`
-	Type    string `yaml:"type"`     // "socks5"
-	Addr    string `yaml:"addr"`     // "host:port"
+	Enabled  bool   `yaml:"enabled"`
+	Type     string `yaml:"type"`     // "socks5"
+	Addr     string `yaml:"addr"`     // "host:port"
 	Username string `yaml:"username"` // optional
 	Password string `yaml:"password"` // optional
+}
+
+type StatsConfig struct {
+	Enabled       bool   `yaml:"enabled"`
+	Interval      string `yaml:"interval"`      // time interval, e.g. "5m", "1h"
+	RequestCount  int    `yaml:"request_count"` // trigger after N requests (0=disabled)
 }
 
 func Load(path string) (*Config, error) {

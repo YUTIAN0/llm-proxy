@@ -465,7 +465,8 @@ func (a *ClaudeToOpenAIAdaptor) DoResponse(c *gin.Context, resp *http.Response, 
 	return claudeResp, nil
 }
 
-func (a *ClaudeToOpenAIAdaptor) streamClaudeResponse(c *gin.Context, resp *http.Response) error {
+//nolint:errcheck
+func (a *ClaudeToOpenAIAdaptor) streamClaudeResponse(c *gin.Context, resp *http.Response, info *RelayInfo) error {
 	if resp.StatusCode != http.StatusOK {
 		errBody, _ := io.ReadAll(resp.Body)
 		log.Printf("[relay] upstream stream error: status=%d body=%s", resp.StatusCode, string(errBody))
@@ -553,6 +554,8 @@ func (a *ClaudeToOpenAIAdaptor) streamClaudeResponse(c *gin.Context, resp *http.
 		return err
 	}
 
+	info.InputTokens = state.InputTokens
+	info.OutputTokens = state.OutputTokens
 	return nil
 }
 

@@ -24,6 +24,7 @@ func main() {
 	}
 
 	channel.Init(cfg)
+	channel.InitStats(cfg.Stats)
 
 	// Initialize proxy if configured
 	proxy.Init(cfg.Proxy)

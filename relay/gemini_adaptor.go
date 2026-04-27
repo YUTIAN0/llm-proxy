@@ -292,7 +292,7 @@ func (a *GeminiToOpenAIAdaptor) convertOpenAIToGemini(openaiResp map[string]any,
 
 // streamGeminiResponse handles Gemini streaming: reads upstream OpenAI SSE, converts to Gemini format.
 //nolint:errcheck
-func (a *GeminiToOpenAIAdaptor) streamGeminiResponse(c *gin.Context, resp *http.Response) error {
+func (a *GeminiToOpenAIAdaptor) streamGeminiResponse(c *gin.Context, resp *http.Response, info *RelayInfo) error {
 	if resp.StatusCode != http.StatusOK {
 		errBody, _ := io.ReadAll(resp.Body)
 		log.Printf("[relay] upstream gemini stream error: status=%d body=%s", resp.StatusCode, string(errBody))
@@ -318,6 +318,8 @@ func (a *GeminiToOpenAIAdaptor) streamGeminiResponse(c *gin.Context, resp *http.
 
 	accumulatedText := ""
 	accumulatedThought := ""
+	inputTokens := 0
+	outputTokens := 0
 
 	for scanner.Scan() {
 		line := scanner.Text()
@@ -342,7 +344,7 @@ func (a *GeminiToOpenAIAdaptor) streamGeminiResponse(c *gin.Context, resp *http.
 			debugLog("[UPSTREAM GEMINI SSE] data=%s", truncateStr(dataStr, 500))
 
 			if dataStr == "[DONE]" {
-				// Send final response with usage if available
+				// Extract usage from last chunk if available
 				flusher.Flush()
 				break
 			}
@@ -350,6 +352,16 @@ func (a *GeminiToOpenAIAdaptor) streamGeminiResponse(c *gin.Context, resp *http.
 			var openaiResp map[string]any
 			if err := json.Unmarshal([]byte(dataStr), &openaiResp); err != nil {
 				continue
+			}
+
+			// Extract usage if present
+			if usage, ok := openaiResp["usage"].(map[string]any); ok {
+				if pt, ok := usage["prompt_tokens"].(float64); ok {
+					inputTokens = int(pt)
+				}
+				if ct, ok := usage["completion_tokens"].(float64); ok {
+					outputTokens = int(ct)
+				}
 			}
 
 			// Convert OpenAI chunk to Gemini format
@@ -367,6 +379,8 @@ func (a *GeminiToOpenAIAdaptor) streamGeminiResponse(c *gin.Context, resp *http.
 		return err
 	}
 
+	info.InputTokens = inputTokens
+	info.OutputTokens = outputTokens
 	return nil
 }
 

@@ -172,29 +172,32 @@ func RelayHandler(c *gin.Context) {
 	httpResp := resp.(*http.Response)
 
 	if info.IsStream && info.Format == "claude" {
-		if streamErr := adaptor.(*ClaudeToOpenAIAdaptor).streamClaudeResponse(c, httpResp); streamErr != nil {
+		if streamErr := adaptor.(*ClaudeToOpenAIAdaptor).streamClaudeResponse(c, httpResp, info); streamErr != nil {
 			logRelayResponse(info, adaptor, httpResp.StatusCode, time.Since(startTime), streamErr)
 			c.JSON(http.StatusBadGateway, gin.H{"error": streamErr.Error()})
 		}
 		logRelayResponse(info, adaptor, httpResp.StatusCode, time.Since(startTime), nil)
+		channel.RecordStats(info.ClientAPIKeyName, info.InputTokens, info.OutputTokens)
 		return
 	}
 
 	if info.IsStream && (info.Format == "gemini" || info.Format == "gemini_to_openai") {
-		if streamErr := adaptor.(*GeminiToOpenAIAdaptor).streamGeminiResponse(c, httpResp); streamErr != nil {
+		if streamErr := adaptor.(*GeminiToOpenAIAdaptor).streamGeminiResponse(c, httpResp, info); streamErr != nil {
 			logRelayResponse(info, adaptor, httpResp.StatusCode, time.Since(startTime), streamErr)
 			c.JSON(http.StatusBadGateway, gin.H{"error": streamErr.Error()})
 		}
 		logRelayResponse(info, adaptor, httpResp.StatusCode, time.Since(startTime), nil)
+		channel.RecordStats(info.ClientAPIKeyName, info.InputTokens, info.OutputTokens)
 		return
 	}
 
 	if info.IsStream && info.Format == "openai_to_gemini" {
-		if streamErr := adaptor.(*OpenAIToGeminiAdaptor).streamGeminiToOpenAI(c, httpResp); streamErr != nil {
+		if streamErr := adaptor.(*OpenAIToGeminiAdaptor).streamGeminiToOpenAI(c, httpResp, info); streamErr != nil {
 			logRelayResponse(info, adaptor, httpResp.StatusCode, time.Since(startTime), streamErr)
 			c.JSON(http.StatusBadGateway, gin.H{"error": streamErr.Error()})
 		}
 		logRelayResponse(info, adaptor, httpResp.StatusCode, time.Since(startTime), nil)
+		channel.RecordStats(info.ClientAPIKeyName, info.InputTokens, info.OutputTokens)
 		return
 	}
 
@@ -212,6 +215,7 @@ func RelayHandler(c *gin.Context) {
 			_, _ = c.Writer.WriteString(s)
 		}
 		logRelayResponse(info, adaptor, httpResp.StatusCode, time.Since(startTime), nil)
+		channel.RecordStats(info.ClientAPIKeyName, info.InputTokens, info.OutputTokens)
 		return
 	}
 
@@ -241,5 +245,6 @@ func RelayHandler(c *gin.Context) {
 	}
 
 	logRelayResponse(info, adaptor, httpResp.StatusCode, time.Since(startTime), nil)
+	channel.RecordStats(info.ClientAPIKeyName, info.InputTokens, info.OutputTokens)
 	c.JSON(httpResp.StatusCode, result)
 }
