@@ -15,6 +15,10 @@ Lightweight LLM API proxy that converts between OpenAI, Claude, and Gemini API f
 - **Multi-channel**: Multiple upstream channels with pass-through or proxy mode
 - **HTTP proxy**: Optional SOCKS5 proxy support
 - **Token statistics**: Per-key input/output token usage with interval or request-count triggers
+- **Token counting**: Precise pre-count via tiktoken, fallback when upstream usage is missing
+- **Automatic retry/failover**: Try other channels on upstream failure (configurable status codes)
+- **Parameter override**: Modify request fields before forwarding (set/delete/prepend/append)
+- **Channel health check**: Background health probing with `GET /health/channels` endpoint
 
 ## Quick Start
 
@@ -64,6 +68,26 @@ stats:
   enabled: true
   interval: "5m"
   request_count: 100
+
+# Automatic retry/failover
+retry:
+  enabled: true
+  max_attempts: 3
+  status_codes: [429, 500, 502, 503, 504]
+
+# Parameter override — modify request fields before forwarding
+param_override:
+  - path: "temperature"
+    mode: "set"
+    value: 0.7
+
+# Channel health check
+health_check:
+  enabled: true
+  interval: "30s"
+  timeout: "5s"
+  unhealthy_threshold: 3
+  healthy_threshold: 1
 ```
 
 ### Configuration Reference
@@ -83,6 +107,17 @@ stats:
 | `stats.enabled` | Enable token usage statistics |
 | `stats.interval` | Periodic stats output (e.g. `"5m"`, `"1h"`) |
 | `stats.request_count` | Stats output after N requests (0 = disabled) |
+| `retry.enabled` | Enable automatic retry on upstream failure |
+| `retry.max_attempts` | Maximum retry attempts across channels |
+| `retry.status_codes` | HTTP status codes that trigger retry |
+| `param_override[].path` | Request field to modify (e.g. `"model"`, `"temperature"`) |
+| `param_override[].mode` | `set`, `delete`, `prepend`, or `append` |
+| `param_override[].value` | Value for `set`/`prepend`/`append` |
+| `health_check.enabled` | Enable background channel health probing |
+| `health_check.interval` | Check interval (e.g. `"30s"`) |
+| `health_check.timeout` | Request timeout per check (e.g. `"5s"`) |
+| `health_check.unhealthy_threshold` | Consecutive failures to mark unhealthy |
+| `health_check.healthy_threshold` | Consecutive successes to mark healthy |
 
 ## API
 
@@ -174,6 +209,88 @@ Example output:
 ```
 
 Requests without an API key are counted under `(anonymous)`.
+
+## Token Counting
+
+Input tokens are counted locally using tiktoken before sending to upstream.
+This ensures accurate token statistics even when the upstream doesn't return usage data,
+and enables quota checks before the request is sent.
+
+## Retry / Failover
+
+When an upstream channel returns a retriable status code (429/500/502/503/504 by default),
+the proxy automatically retries the request on the next healthy channel:
+
+```yaml
+retry:
+  enabled: true
+  max_attempts: 3          # Try up to 3 channels
+  status_codes: [429, 500, 502, 503, 504]
+```
+
+Channels are tried in health order: healthy > unknown > unhealthy.
+
+## Parameter Override
+
+Modify request fields before forwarding to upstream. Supports four modes:
+
+| Mode | Description |
+|------|-------------|
+| `set` | Replace the field value entirely |
+| `delete` | Remove the field |
+| `prepend` | Prepend value to existing string |
+| `append` | Append value to existing string |
+
+```yaml
+param_override:
+  - path: "temperature"
+    mode: "set"
+    value: 0.7
+  - path: "max_tokens"
+    mode: "delete"
+  - path: "model"
+    mode: "set"
+    value: "claude-sonnet-4-6"
+```
+
+## Channel Health Check
+
+Background goroutine pings each channel periodically to determine health status.
+Unhealthy channels are deprioritized in the retry pool.
+
+```yaml
+health_check:
+  enabled: true
+  interval: "30s"
+  timeout: "5s"
+  unhealthy_threshold: 3
+  healthy_threshold: 1
+```
+
+### Health Status API
+
+```bash
+curl http://localhost:8080/health/channels
+```
+
+Returns:
+
+```json
+{
+  "channels": [
+    {
+      "name": "primary",
+      "status": "healthy",
+      "consecutive_ok": 5,
+      "consecutive_fail": 0,
+      "response_time_ms": 120,
+      "last_check": "2026-04-28T10:00:00Z"
+    }
+  ]
+}
+```
+
+Possible statuses: `healthy`, `unhealthy`, `unknown`.
 
 ## Build
 

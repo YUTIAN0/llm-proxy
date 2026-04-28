@@ -15,6 +15,10 @@
 - **多渠道**: 支持多个上游渠道，可 pass-through 或代理模式
 - **HTTP 代理**: 可选 SOCKS5 代理支持
 - **Token 统计**: 按 API Key 统计输入输出 token，支持定时或按请求次数输出
+- **Token 精确计数**: 使用 tiktoken 本地预计算输入 token，上游无 usage 时自动回退
+- **自动重试/故障转移**: 上游渠道失败时自动切换其他健康渠道
+- **参数覆盖**: 转发前修改请求字段（set/delete/prepend/append）
+- **渠道健康检查**: 后台定期探测渠道健康状态，支持 `/health/channels` 接口
 
 ## 快速开始
 
@@ -74,6 +78,26 @@ stats:
   enabled: true
   interval: "5m"
   request_count: 100
+
+# 自动重试/故障转移
+retry:
+  enabled: true
+  max_attempts: 3
+  status_codes: [429, 500, 502, 503, 504]
+
+# 参数覆盖 — 转发前修改请求字段
+param_override:
+  - path: "temperature"
+    mode: "set"
+    value: 0.7
+
+# 渠道健康检查
+health_check:
+  enabled: true
+  interval: "30s"
+  timeout: "5s"
+  unhealthy_threshold: 3
+  healthy_threshold: 1
 ```
 
 ### 配置字段说明
@@ -93,6 +117,17 @@ stats:
 | `stats.enabled` | 是否启用 token 统计 |
 | `stats.interval` | 定时输出统计（如 `"5m"`、`"1h"`） |
 | `stats.request_count` | 每 N 次请求输出统计（0 = 不启用） |
+| `retry.enabled` | 启用上游失败时自动重试 |
+| `retry.max_attempts` | 最大重试次数（跨渠道） |
+| `retry.status_codes` | 触发重试的 HTTP 状态码 |
+| `param_override[].path` | 要修改的请求字段（如 `"model"`、`"temperature"`） |
+| `param_override[].mode` | `set`、`delete`、`prepend`、`append` |
+| `param_override[].value` | `set`/`prepend`/`append` 的值 |
+| `health_check.enabled` | 启用后台渠道健康探测 |
+| `health_check.interval` | 检查间隔（如 `"30s"`） |
+| `health_check.timeout` | 单次请求超时（如 `"5s"`） |
+| `health_check.unhealthy_threshold` | 连续失败次数标记为不健康 |
+| `health_check.healthy_threshold` | 连续成功次数标记为健康 |
 
 ## API 使用
 
@@ -185,6 +220,84 @@ stats:
 ```
 
 未携带 API Key 的请求统一归类为 `(anonymous)`。
+
+## Token 精确计数
+
+使用 tiktoken 在发送请求前本地计算输入 token 数量。即使上游不返回 usage 数据，也能保证统计准确，并支持在请求发送前进行配额检查。
+
+## 自动重试/故障转移
+
+当上游渠道返回可重试的状态码（默认 429/500/502/503/504）时，代理自动切换到下一个健康的渠道重试：
+
+```yaml
+retry:
+  enabled: true
+  max_attempts: 3          # 最多尝试 3 个渠道
+  status_codes: [429, 500, 502, 503, 504]
+```
+
+渠道按健康状态排序尝试：健康 > 未知 > 不健康。
+
+## 参数覆盖
+
+在转发到上游之前修改请求字段，支持四种模式：
+
+| 模式 | 说明 |
+|------|------|
+| `set` | 完全替换字段值 |
+| `delete` | 删除该字段 |
+| `prepend` | 在原有字符串前追加 |
+| `append` | 在原有字符串后追加 |
+
+```yaml
+param_override:
+  - path: "temperature"
+    mode: "set"
+    value: 0.7
+  - path: "max_tokens"
+    mode: "delete"
+  - path: "model"
+    mode: "set"
+    value: "claude-sonnet-4-6"
+```
+
+## 渠道健康检查
+
+后台协程定期 ping 每个渠道以探测健康状态。不健康的渠道在重试池中优先级最低。
+
+```yaml
+health_check:
+  enabled: true
+  interval: "30s"
+  timeout: "5s"
+  unhealthy_threshold: 3
+  healthy_threshold: 1
+```
+
+### 健康状态 API
+
+```bash
+curl http://localhost:8080/health/channels
+```
+
+返回：
+
+```json
+{
+  "channels": [
+    {
+      "name": "primary",
+      "status": "healthy",
+      "consecutive_ok": 5,
+      "consecutive_fail": 0,
+      "response_time_ms": 120,
+      "last_check": "2026-04-28T10:00:00Z"
+    }
+  ]
+}
+```
+
+健康状态可选值：`healthy`（健康）、`unhealthy`（不健康）、`unknown`（未知）。
 
 ## 构建
 
