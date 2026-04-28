@@ -170,7 +170,7 @@ func (hc *HealthChecker) checkChannel(name string) {
 		log.Printf("[health] channel=%s status=unhealthy error=%s duration=%v", name, err, elapsed)
 		return
 	}
-	io.ReadAll(resp.Body)
+	_, _ = io.ReadAll(resp.Body)
 	resp.Body.Close()
 
 	if resp.StatusCode >= 200 && resp.StatusCode < 500 {

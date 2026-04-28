@@ -79,6 +79,7 @@ func logRelayResponse(info *RelayInfo, adaptor Adaptor, statusCode int, duration
 }
 
 // extractModelFromPath extracts model name from Gemini-style URL paths.
+//nolint:unused
 func extractModelFromPath(fullPath string) string {
 	path := fullPath
 	for _, prefix := range []string{"/v1beta/", "/v1/"} {

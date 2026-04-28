@@ -3,7 +3,6 @@ package service
 import (
 	"fmt"
 	"strings"
-	"sync"
 
 	"github.com/llm-proxy/dto"
 	"github.com/tiktoken-go/tokenizer"
@@ -11,36 +10,9 @@ import (
 )
 
 var defaultEncoder tokenizer.Codec
-var encoderMap = make(map[string]tokenizer.Codec)
-var encoderMu sync.RWMutex
 
 func InitTokenEncoders() {
 	defaultEncoder = codec.NewCl100kBase()
-}
-
-func getEncoder(model string) tokenizer.Codec {
-	encoderMu.RLock()
-	if enc, ok := encoderMap[model]; ok {
-		encoderMu.RUnlock()
-		return enc
-	}
-	encoderMu.RUnlock()
-
-	encoderMu.Lock()
-	defer encoderMu.Unlock()
-
-	if enc, ok := encoderMap[model]; ok {
-		return enc
-	}
-
-	m, err := tokenizer.ForModel(tokenizer.Model(model))
-	if err != nil {
-		encoderMap[model] = defaultEncoder
-		return defaultEncoder
-	}
-
-	encoderMap[model] = m
-	return m
 }
 
 // CountTextToken counts tokens in plain text using tiktoken cl100k_base.
