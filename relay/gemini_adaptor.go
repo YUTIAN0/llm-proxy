@@ -381,6 +381,9 @@ func (a *GeminiToOpenAIAdaptor) streamGeminiResponse(c *gin.Context, resp *http.
 
 	info.InputTokens = inputTokens
 	info.OutputTokens = outputTokens
+	if info.InputTokens == 0 {
+		info.InputTokens = info.PreCountTokens
+	}
 	return nil
 }
 

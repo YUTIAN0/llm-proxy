@@ -15,6 +15,9 @@ type Config struct {
 	Proxy          ProxyConfig     `yaml:"proxy"`
 	RequireValidKey bool          `yaml:"require_valid_key"` // if true, reject requests with unconfigured API keys
 	Stats          StatsConfig     `yaml:"stats"`
+	Retry          RetryConfig     `yaml:"retry"`
+	ParamOverride  []ParamOverrideRule `yaml:"param_override"`
+	HealthCheck    HealthCheckConfig `yaml:"health_check"`
 }
 
 type ServerConfig struct {
@@ -56,6 +59,26 @@ type StatsConfig struct {
 	Enabled       bool   `yaml:"enabled"`
 	Interval      string `yaml:"interval"`      // time interval, e.g. "5m", "1h"
 	RequestCount  int    `yaml:"request_count"` // trigger after N requests (0=disabled)
+}
+
+type RetryConfig struct {
+	Enabled     bool     `yaml:"enabled"`
+	MaxAttempts int      `yaml:"max_attempts"`
+	StatusCodes []int    `yaml:"status_codes"`
+}
+
+type ParamOverrideRule struct {
+	Path  string `yaml:"path"`  // JSON path, e.g. "model", "temperature", "messages.0.content"
+	Mode  string `yaml:"mode"`  // set, delete, prepend, append
+	Value any    `yaml:"value"` // value to set/prepend/append
+}
+
+type HealthCheckConfig struct {
+	Enabled            bool   `yaml:"enabled"`
+	Interval           string `yaml:"interval"`            // check interval, e.g. "30s"
+	Timeout            string `yaml:"timeout"`             // request timeout, e.g. "5s"
+	UnhealthyThreshold int    `yaml:"unhealthy_threshold"` // consecutive failures to mark unhealthy
+	HealthyThreshold   int    `yaml:"healthy_threshold"`   // consecutive successes to mark healthy
 }
 
 func Load(path string) (*Config, error) {

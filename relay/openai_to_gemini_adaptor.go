@@ -189,6 +189,9 @@ func (a *OpenAIToGeminiAdaptor) streamGeminiToOpenAI(c *gin.Context, resp *http.
 	flusher.Flush()
 	info.InputTokens = inputTokens
 	info.OutputTokens = outputTokens
+	if info.InputTokens == 0 {
+		info.InputTokens = info.PreCountTokens
+	}
 	return nil
 }
 

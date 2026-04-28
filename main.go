@@ -12,6 +12,7 @@ import (
 	"github.com/llm-proxy/config"
 	"github.com/llm-proxy/proxy"
 	"github.com/llm-proxy/relay"
+	"github.com/llm-proxy/service"
 )
 
 func main() {
@@ -25,6 +26,10 @@ func main() {
 
 	channel.Init(cfg)
 	channel.InitStats(cfg.Stats)
+	service.InitTokenEncoders()
+	relay.SetConfig(cfg)
+	channels := channel.GetAllChannels()
+	channel.InitHealthChecker(cfg.HealthCheck, channels)
 
 	// Initialize proxy if configured
 	proxy.Init(cfg.Proxy)
@@ -114,6 +119,12 @@ func main() {
 		}
 
 		c.JSON(http.StatusOK, gin.H{"status": "ok"})
+	})
+
+	// GET /health/channels - channel health status
+	r.GET("/health/channels", func(c *gin.Context) {
+		health := channel.GetAllHealth()
+		c.JSON(http.StatusOK, gin.H{"channels": health})
 	})
 
 	addr := ":8080"

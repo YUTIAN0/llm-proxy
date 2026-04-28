@@ -328,3 +328,54 @@ func GetAllAPIKeys() []string {
 	}
 	return keys
 }
+
+// GetOrderedChannels returns all channels ordered by health status (healthy first),
+// excluding channels that are unhealthy when excludeUnhealthy is true.
+func GetOrderedChannels(excludeUnhealthy bool) []*config.ChannelConfig {
+	manager.mu.RLock()
+	defer manager.mu.RUnlock()
+
+	channels := make([]*config.ChannelConfig, 0, len(manager.channels))
+	for _, ch := range manager.channels {
+		channels = append(channels, ch)
+	}
+
+	// Sort by health status
+	sort.Slice(channels, func(i, j int) bool {
+		si := GetHealthStatus(channels[i].Name)
+		sj := GetHealthStatus(channels[j].Name)
+		// healthy > unknown > unhealthy
+		rank := func(s HealthStatus) int {
+			switch s {
+			case Healthy:
+				return 2
+			case Unknown:
+				return 1
+			case Unhealthy:
+				return 0
+			default:
+				return 1
+			}
+		}
+		ri, rj := rank(si), rank(sj)
+		if ri != rj {
+			return ri > rj
+		}
+		return channels[i].Name < channels[j].Name
+	})
+
+	if !excludeUnhealthy {
+		return channels
+	}
+
+	result := make([]*config.ChannelConfig, 0, len(channels))
+	for _, ch := range channels {
+		if GetHealthStatus(ch.Name) != Unhealthy {
+			result = append(result, ch)
+		}
+	}
+	if len(result) == 0 {
+		return channels
+	}
+	return result
+}

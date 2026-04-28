@@ -556,6 +556,9 @@ func (a *ClaudeToOpenAIAdaptor) streamClaudeResponse(c *gin.Context, resp *http.
 
 	info.InputTokens = state.InputTokens
 	info.OutputTokens = state.OutputTokens
+	if info.InputTokens == 0 {
+		info.InputTokens = info.PreCountTokens
+	}
 	return nil
 }
 

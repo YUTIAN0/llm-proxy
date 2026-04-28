@@ -201,10 +201,11 @@ func (sm *StatsManager) printAndReset() {
 	b := &strings.Builder{}
 	b.WriteString(fmt.Sprintf("\n[stats] === %s ===\n", trigger))
 
-	border := fmt.Sprintf("[stats] +-%-*+-%-*+--------+------------+-------------+\n", maxKey, maxModel)
+	border := fmt.Sprintf("[stats] +-%s+-%s+--------+------------+-------------+\n",
+		strings.Repeat("-", maxKey), strings.Repeat("-", maxModel))
 	b.WriteString(border)
-	b.WriteString(fmt.Sprintf("[stats] |-%-*|-%-*| %6s | %10s | %11s |\n",
-		maxKey, maxModel, "reqs", "in", "out"))
+	b.WriteString(fmt.Sprintf("[stats] |-%s|-%s| %6s | %10s | %11s |\n",
+		strings.Repeat("-", maxKey), strings.Repeat("-", maxModel), "reqs", "in", "out"))
 	b.WriteString(border)
 
 	for _, r := range rows {

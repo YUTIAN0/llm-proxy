@@ -34,6 +34,7 @@ type RelayInfo struct {
 	CustomHeaders    map[string]string
 	InputTokens      int
 	OutputTokens     int
+	PreCountTokens   int // input tokens counted via tiktoken before sending to upstream
 }
 
 // SSE event structs to maintain correct field order in JSON output.
