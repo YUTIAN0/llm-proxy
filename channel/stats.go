@@ -6,7 +6,6 @@ import (
 	"sort"
 	"strings"
 	"sync"
-	"sync/atomic"
 	"time"
 
 	"github.com/llm-proxy/config"
@@ -28,12 +27,12 @@ type KeyStat struct {
 }
 
 type StatsManager struct {
-	mu            sync.Mutex
-	keyStats      map[string]*KeyStat
-	totalRequests int64
-	interval      time.Duration
-	countTrigger  int
-	stopCh        chan struct{}
+	mu           sync.Mutex
+	keyStats     map[string]*KeyStat
+	windowReqs   int64
+	interval     time.Duration
+	countTrigger int
+	stopCh       chan struct{}
 }
 
 var statsManager *StatsManager
@@ -95,11 +94,11 @@ func RecordStats(keyName, model string, inputTokens, outputTokens int) {
 	ms.InputTokens += int64(inputTokens)
 	ms.OutputTokens += int64(outputTokens)
 	ms.Requests++
+	sm.windowReqs++
+	currentReqs := sm.windowReqs
 	sm.mu.Unlock()
 
-	newTotal := atomic.AddInt64(&sm.totalRequests, 1)
-
-	if sm.countTrigger > 0 && newTotal%int64(sm.countTrigger) == 0 {
+	if sm.countTrigger > 0 && currentReqs >= int64(sm.countTrigger) {
 		sm.printAndReset()
 	}
 }

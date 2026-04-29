@@ -71,6 +71,24 @@ func countMessageTokens(msg dto.OpenAIMessage) int {
 		}
 	}
 
+	// Count reasoning tokens
+	if msg.ReasoningContent != "" {
+		tokens += CountTextToken(msg.ReasoningContent)
+	}
+
+	// Count tool call tokens
+	for _, tc := range msg.ToolCalls {
+		if tc.ID != "" {
+			tokens += CountTextToken(tc.ID)
+		}
+		if tc.Function.Name != "" {
+			tokens += CountTextToken(tc.Function.Name)
+		}
+		if tc.Function.Arguments != "" {
+			tokens += CountTextToken(tc.Function.Arguments)
+		}
+	}
+
 	return tokens
 }
 
