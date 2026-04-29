@@ -113,7 +113,14 @@ func CovertOpenAI2Gemini(openaiReq *dto.OpenAIChatRequest) (map[string]any, erro
 			}
 		case "tool":
 			// Tool result → user message with functionResponse
-			name := ""
+			name := msg.ToolCallID
+			if name == "" {
+				name = "unknown_tool"
+			}
+			// Strip "call_" prefix to get function name
+			if strings.HasPrefix(name, "call_") {
+				name = strings.TrimPrefix(name, "call_")
+			}
 			respContent := extractTextContent(msg.Content)
 			// Try to parse as JSON object
 			var respObj map[string]any

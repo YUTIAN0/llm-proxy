@@ -173,7 +173,7 @@ func (hc *HealthChecker) checkChannel(name string) {
 	_, _ = io.ReadAll(resp.Body)
 	resp.Body.Close()
 
-	if resp.StatusCode >= 200 && resp.StatusCode < 500 {
+	if resp.StatusCode >= 200 && resp.StatusCode < 300 {
 		chHealth.ConsecutiveOk++
 		chHealth.ConsecutiveFail = 0
 		if chHealth.ConsecutiveOk >= hc.healthyThreshold {

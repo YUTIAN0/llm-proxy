@@ -17,20 +17,24 @@ func ApplyParamOverride(body map[string]any, rules []config.ParamOverrideRule) m
 		case "delete":
 			delete(body, rule.Path)
 		case "prepend":
-			if current, ok := body[rule.Path]; ok {
-				if s, ok := current.(string); ok {
-					body[rule.Path] = rule.Value.(string) + s
+			if rv, ok := rule.Value.(string); ok {
+				if current, ok := body[rule.Path]; ok {
+					if s, ok := current.(string); ok {
+						body[rule.Path] = rv + s
+					}
+				} else {
+					body[rule.Path] = rv
 				}
-			} else {
-				body[rule.Path] = rule.Value
 			}
 		case "append":
-			if current, ok := body[rule.Path]; ok {
-				if s, ok := current.(string); ok {
-					body[rule.Path] = s + rule.Value.(string)
+			if rv, ok := rule.Value.(string); ok {
+				if current, ok := body[rule.Path]; ok {
+					if s, ok := current.(string); ok {
+						body[rule.Path] = s + rv
+					}
+				} else {
+					body[rule.Path] = rv
 				}
-			} else {
-				body[rule.Path] = rule.Value
 			}
 		}
 	}

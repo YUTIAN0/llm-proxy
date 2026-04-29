@@ -227,4 +227,5 @@ func (sm *StatsManager) printAndReset() {
 
 	// Reset
 	sm.keyStats = make(map[string]*KeyStat)
+	sm.windowReqs = 0
 }
