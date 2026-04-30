@@ -34,6 +34,7 @@ type StatsManager struct {
 	countTrigger int
 	stopCh       chan struct{}
 	startTime    time.Time
+	periodStart  time.Time
 }
 
 var statsManager *StatsManager
@@ -48,6 +49,7 @@ func InitStats(cfg config.StatsConfig) {
 		countTrigger: cfg.RequestCount,
 		stopCh:       make(chan struct{}),
 		startTime:    time.Now(),
+		periodStart:  time.Now(),
 	}
 
 	if cfg.Interval != "" {
@@ -128,7 +130,8 @@ func (sm *StatsManager) printAndReset() {
 	}
 
 	upTime := time.Since(sm.startTime).Truncate(time.Second)
-	trigger := fmt.Sprintf("uptime:%s", upTime)
+	period := time.Since(sm.periodStart).Truncate(time.Second)
+	trigger := fmt.Sprintf("uptime:%s interval:%s", upTime, period)
 
 	// Collect rows
 	type row struct {
@@ -216,7 +219,7 @@ func (sm *StatsManager) printAndReset() {
 
 	log.Print(b.String())
 
-	// Reset
-	sm.keyStats = make(map[string]*KeyStat)
+	// Update period start for next output, keep keyStats accumulating from startup
+	sm.periodStart = time.Now()
 	sm.windowReqs = 0
 }
