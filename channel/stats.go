@@ -33,6 +33,7 @@ type StatsManager struct {
 	interval     time.Duration
 	countTrigger int
 	stopCh       chan struct{}
+	startTime    time.Time
 }
 
 var statsManager *StatsManager
@@ -46,6 +47,7 @@ func InitStats(cfg config.StatsConfig) {
 		keyStats:     make(map[string]*KeyStat),
 		countTrigger: cfg.RequestCount,
 		stopCh:       make(chan struct{}),
+		startTime:    time.Now(),
 	}
 
 	if cfg.Interval != "" {
@@ -125,19 +127,8 @@ func (sm *StatsManager) printAndReset() {
 		return
 	}
 
-	var trigger string
-	if sm.interval > 0 {
-		trigger = fmt.Sprintf("interval:%s", sm.interval)
-	}
-	if sm.countTrigger > 0 {
-		if trigger != "" {
-			trigger += " + "
-		}
-		trigger += fmt.Sprintf("request_count:%d", sm.countTrigger)
-	}
-	if trigger == "" {
-		trigger = "manual"
-	}
+	upTime := time.Since(sm.startTime).Truncate(time.Second)
+	trigger := fmt.Sprintf("uptime:%s", upTime)
 
 	// Collect rows
 	type row struct {
