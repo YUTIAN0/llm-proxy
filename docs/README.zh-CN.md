@@ -31,6 +31,8 @@ go build -o llm-proxy && ./llm-proxy --config config.yaml
 ```yaml
 server:
   port: 8080              # 监听端口
+  timeout: "30s"          # 上游请求超时时间，设为 0 或留空表示不限超时
+  verify_ssl: true        # 设为 false 可跳过上游 TLS 证书验证
   tls:
     cert: /path/to/cert.pem
     key: /path/to/key.pem  # HTTPS 证书（可选）
@@ -105,6 +107,8 @@ health_check:
 | 字段 | 说明 |
 |------|------|
 | `server.port` | 服务监听端口，默认 8080 |
+| `server.timeout` | 上游请求超时时间（如 `"30s"`），设为 0 或留空表示不限超时 |
+| `server.verify_ssl` | 验证上游 TLS 证书，默认 `true`，设为 `false` 跳过验证 |
 | `channels` | 上游渠道列表，每个渠道指定 API Key、地址、格式和模型 |
 | `default_channel` | 未匹配到 API Key 时使用的默认渠道 |
 | `model_aliases` | 模型别名映射，客户端用别名请求，代理自动转为上游真实模型 |

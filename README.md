@@ -31,6 +31,8 @@ go build -o llm-proxy && ./llm-proxy --config config.yaml
 ```yaml
 server:
   port: 8080
+  timeout: "30s"     # upstream request timeout, 0 or empty for no timeout
+  verify_ssl: true   # set to false to skip upstream TLS certificate verification
   tls:
     cert: /path/to/cert.pem
     key: /path/to/key.pem
@@ -95,6 +97,8 @@ health_check:
 | Field | Description |
 |-------|-------------|
 | `server.port` | Listen port, default 8080 |
+| `server.timeout` | Upstream request timeout (e.g. `"30s"`), 0 or empty = no timeout |
+| `server.verify_ssl` | Verify upstream TLS certificate, default `true`, set `false` to skip |
 | `channels` | Upstream channel list (name, API key, base URL, format, models) |
 | `default_channel` | Fallback channel when no API key matches |
 | `model_aliases` | Model alias mapping, client uses alias, proxy translates to upstream model |

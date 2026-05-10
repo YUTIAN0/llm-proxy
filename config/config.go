@@ -21,8 +21,10 @@ type Config struct {
 }
 
 type ServerConfig struct {
-	Port int         `yaml:"port"`
-	TLS  TLSConfig   `yaml:"tls"`
+	Port      int         `yaml:"port"`
+	TLS       TLSConfig   `yaml:"tls"`
+	Timeout   string      `yaml:"timeout"`    // request timeout for upstream, e.g. "30s", "0" to disable
+	VerifySSL *bool       `yaml:"verify_ssl"` // verify upstream TLS certificate, default true
 }
 
 type TLSConfig struct {

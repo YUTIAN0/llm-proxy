@@ -204,10 +204,7 @@ func (a *GeminiToOpenAIAdaptor) DoRequest(c *gin.Context, info *RelayInfo, reque
 	}
 	_ = a.SetupRequestHeader(&httpReq.Header, info)
 
-	client := proxy.GetClient()
-	if client == nil {
-		client = &http.Client{}
-	}
+	client := proxy.GetClientWithTimeout(getRequestTimeout())
 	resp, err := client.Do(httpReq)
 	if err != nil {
 		return nil, err

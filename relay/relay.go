@@ -24,6 +24,19 @@ func SetConfig(cfg *config.Config) {
 	globalCfg = cfg
 }
 
+// getRequestTimeout returns the configured upstream request timeout.
+// Returns 0 (no timeout) if not configured or set to "0".
+func getRequestTimeout() time.Duration {
+	if globalCfg == nil || globalCfg.Server.Timeout == "" {
+		return 0
+	}
+	d, err := time.ParseDuration(globalCfg.Server.Timeout)
+	if err != nil {
+		return 0
+	}
+	return d
+}
+
 func RelayHandler(c *gin.Context) {
 	startTime := time.Now()
 

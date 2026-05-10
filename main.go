@@ -37,6 +37,16 @@ func main() {
 		log.Printf("proxy enabled: socks5://%s", cfg.Proxy.Addr)
 	}
 
+	// SSL verification setting (default: verify)
+	verifySSL := true
+	if cfg.Server.VerifySSL != nil {
+		verifySSL = *cfg.Server.VerifySSL
+	}
+	proxy.SetVerifySSL(verifySSL)
+	if !verifySSL {
+		log.Printf("warning: upstream TLS certificate verification is disabled")
+	}
+
 	r := gin.Default()
 
 	// OpenAI compatible and Claude/Gemini relay handlers

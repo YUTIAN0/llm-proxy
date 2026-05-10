@@ -10,6 +10,7 @@ import (
 	"time"
 
 	"github.com/llm-proxy/config"
+	"github.com/llm-proxy/proxy"
 )
 
 type HealthStatus string
@@ -139,7 +140,7 @@ func (hc *HealthChecker) checkChannel(name string) {
 		return
 	}
 
-	client := &http.Client{Timeout: hc.timeout}
+	client := proxy.GetClientWithTimeout(hc.timeout)
 	body := []byte(`{"model":"gpt-3.5-turbo","messages":[{"role":"user","content":"ping"}],"max_tokens":1}`)
 	req, err := http.NewRequest("POST", ch.BaseURL+"/v1/chat/completions",
 		bytes.NewReader(body))
