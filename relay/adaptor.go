@@ -198,6 +198,8 @@ func GetAdaptorByFormat(format string, mode int) Adaptor {
 		return &OpenAIToGeminiAdaptor{}
 	case "responses":
 		return &ResponsesAdaptor{}
+	case "responses_compact":
+		return &ResponsesCompactAdaptor{}
 	default:
 		return &OpenAIAdaptor{}
 	}

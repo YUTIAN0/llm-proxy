@@ -210,3 +210,21 @@ type ResponsesStreamEvent struct {
 	ContentIndex *int                    `json:"content_index,omitempty"`
 	ItemID       string                  `json:"item_id,omitempty"`
 }
+
+// OpenAIResponsesCompactRequest represents a /v1/responses/compact request.
+type OpenAIResponsesCompactRequest struct {
+	Model              string          `json:"model"`
+	Input              json.RawMessage `json:"input,omitempty"`
+	Instructions       json.RawMessage `json:"instructions,omitempty"`
+	PreviousResponseID string          `json:"previous_response_id,omitempty"`
+}
+
+// OpenAIResponsesCompactResponse represents a /v1/responses/compact response.
+type OpenAIResponsesCompactResponse struct {
+	ID        string          `json:"id"`
+	Object    string          `json:"object"`
+	CreatedAt int             `json:"created_at"`
+	Output    json.RawMessage `json:"output"`
+	Usage     *ResponsesUsage `json:"usage"`
+	Error     any             `json:"error,omitempty"`
+}

@@ -336,6 +336,10 @@ func resolveChannel(path string, bodyModel string, c *gin.Context, clientAPIKey 
 		ch := channel.GetDefault()
 		format = "gemini_to_openai"
 		return ch, nil, format
+	} else if strings.HasPrefix(path, "/v1/responses/compact") {
+		ch := channel.GetDefault()
+		format = "responses_compact"
+		return ch, nil, format
 	} else if strings.HasPrefix(path, "/v1/responses") {
 		ch := channel.GetDefault()
 		format = "responses"
