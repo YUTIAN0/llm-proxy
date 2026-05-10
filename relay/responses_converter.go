@@ -112,6 +112,10 @@ func ResponsesRequestToChatRequest(req *dto.OpenAIResponsesRequest) (*dto.OpenAI
 		if role == "" {
 			role = "user"
 		}
+		// Map Responses API roles to Chat Completions roles
+		if role == "developer" {
+			role = "system"
+		}
 
 		// Handle content: string or array of content parts
 		var content any
@@ -155,6 +159,27 @@ func ResponsesRequestToChatRequest(req *dto.OpenAIResponsesRequest) (*dto.OpenAI
 			Role:    role,
 			Content: content,
 		})
+	}
+
+	// Move all system/developer messages to the front and merge into a single
+	// system message. Some upstreams (e.g. new-api/vllm) only allow one system
+	// message at the beginning.
+	var systemParts []string
+	var otherMsgs []dto.OpenAIMessage
+	for _, m := range chatReq.Messages {
+		if m.Role == "system" {
+			if content, ok := m.Content.(string); ok && content != "" {
+				systemParts = append(systemParts, content)
+			}
+		} else {
+			otherMsgs = append(otherMsgs, m)
+		}
+	}
+	if len(systemParts) > 0 {
+		merged := dto.OpenAIMessage{Role: "system", Content: strings.Join(systemParts, "\n\n")}
+		chatReq.Messages = append([]dto.OpenAIMessage{merged}, otherMsgs...)
+	} else {
+		chatReq.Messages = otherMsgs
 	}
 
 	// If no messages were created, add a default empty user message
