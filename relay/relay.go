@@ -643,6 +643,17 @@ func sendAndHandleRequestWithAdaptor(c *gin.Context, path string, mode int, info
 		return fmt.Errorf("upstream returned %d", httpResp.StatusCode)
 	}
 
+	// Check for upstream HTTP errors before entering streaming paths.
+	// Without this, streaming handlers silently produce empty responses on 4xx/5xx.
+	if httpResp.StatusCode >= 400 {
+		bodyBytes, _ := io.ReadAll(httpResp.Body)
+		httpResp.Body.Close()
+		errMsg := truncateStr(string(bodyBytes), 500)
+		log.Printf("[relay] upstream error: status=%d body=%s", httpResp.StatusCode, errMsg)
+		c.JSON(httpResp.StatusCode, map[string]any{"error": map[string]any{"message": errMsg, "type": "upstream_error"}})
+		return nil
+	}
+
 	if info.IsStream && info.Format == "claude" {
 		if streamErr := adaptor.(*ClaudeToOpenAIAdaptor).streamClaudeResponse(c, httpResp, info); streamErr != nil {
 			logRelayResponse(info, adaptor, httpResp.StatusCode, time.Since(startTime), streamErr)
