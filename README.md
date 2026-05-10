@@ -6,7 +6,7 @@ Lightweight LLM API proxy that converts between OpenAI, Claude, and Gemini API f
 
 ## Features
 
-- **Multi-format conversion**: OpenAI ↔ Claude Messages API ↔ Google Gemini
+- **Multi-format conversion**: OpenAI ↔ Claude Messages API ↔ Google Gemini ↔ OpenAI Responses API
 - **Model aliases**: Map any model name to an upstream model (e.g. `claude-sonnet-4-6` → `Qwen3-32B`)
 - **API key management**: Per-key model authorization with allowed/denied lists
 - **Model-based routing**: Route different models to different upstream channels
@@ -176,7 +176,17 @@ The proxy selects an upstream channel in this order:
 | Claude Messages | OpenAI | Claude → OpenAI |
 | Gemini | OpenAI | Gemini → OpenAI |
 | OpenAI | Gemini | OpenAI → Gemini |
+| Responses API | Chat Completions | Responses → Chat |
+| Chat Completions | Responses API | Chat → Responses |
 | OpenAI | OpenAI | Passthrough |
+
+### Responses API Support
+
+- `POST /v1/responses` — OpenAI Responses API endpoint
+- Automatic conversion: Responses API requests are converted to Chat Completions for upstream, responses converted back
+- Streaming: Responses SSE events (`response.output_text.delta`, `response.function_call_arguments.delta`, etc.) are converted to Chat Completions SSE chunks
+- Tool calls: `function_call` items converted between formats
+- Reasoning: `response.reasoning_summary_text.delta` → `reasoning_content` delta
 
 ### Claude Format Support
 

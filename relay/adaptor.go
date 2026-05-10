@@ -20,21 +20,22 @@ type Adaptor interface {
 
 // RelayInfo carries context for a single relay request.
 type RelayInfo struct {
-	Mode             int
-	OriginModel      string
-	UpstreamModel    string
-	ChannelID        int
-	ChannelName      string
-	APIKey           string
-	ClientAPIKey     string
-	ClientAPIKeyName string
-	BaseURL          string
-	Format           string
-	IsStream         bool
-	CustomHeaders    map[string]string
-	InputTokens      int
-	OutputTokens     int
-	PreCountTokens   int // input tokens counted via tiktoken before sending to upstream
+	Mode                   int
+	OriginModel            string
+	UpstreamModel          string
+	ChannelID              int
+	ChannelName            string
+	APIKey                 string
+	ClientAPIKey           string
+	ClientAPIKeyName       string
+	BaseURL                string
+	Format                 string
+	IsStream               bool
+	CustomHeaders          map[string]string
+	InputTokens            int
+	OutputTokens           int
+	PreCountTokens         int // input tokens counted via tiktoken before sending to upstream
+	LastUpstreamStatusCode int // HTTP status code from last upstream response, used by auto-detect
 }
 
 // SSE event structs to maintain correct field order in JSON output.
@@ -195,6 +196,8 @@ func GetAdaptorByFormat(format string, mode int) Adaptor {
 		return &GeminiToOpenAIAdaptor{}
 	case "openai_to_gemini":
 		return &OpenAIToGeminiAdaptor{}
+	case "responses":
+		return &ResponsesAdaptor{}
 	default:
 		return &OpenAIAdaptor{}
 	}

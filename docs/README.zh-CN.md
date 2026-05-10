@@ -6,7 +6,7 @@
 
 ## 功能特性
 
-- **多格式转换**: OpenAI ↔ Claude Messages API ↔ Google Gemini
+- **多格式转换**: OpenAI ↔ Claude Messages API ↔ Google Gemini ↔ OpenAI Responses API
 - **模型别名**: 将任意模型名映射到上游模型（如 `claude-sonnet-4-6` → `Qwen3-32B`）
 - **API Key 管理**: 每个 Key 独立配置允许/拒绝的模型列表
 - **模型路由**: 根据不同模型路由到不同的上游渠道
@@ -187,7 +187,17 @@ curl http://localhost:8080/v1/models/claude-sonnet-4-6
 | Claude Messages | OpenAI | Claude → OpenAI |
 | Gemini | OpenAI | Gemini → OpenAI |
 | OpenAI | Gemini | OpenAI → Gemini |
+| Responses API | Chat Completions | Responses → Chat |
+| Chat Completions | Responses API | Chat → Responses |
 | OpenAI | OpenAI | 透传 |
+
+### Responses API 支持
+
+- `POST /v1/responses` — OpenAI Responses API 端点
+- 自动转换：Responses API 请求转为 Chat Completions 发送到上游，响应自动转回
+- 流式：Responses SSE 事件（`response.output_text.delta`、`response.function_call_arguments.delta` 等）转为 Chat Completions SSE chunks
+- 工具调用：`function_call` 在两种格式间自动转换
+- 推理：`response.reasoning_summary_text.delta` → `reasoning_content` delta
 
 ### Claude 格式支持
 

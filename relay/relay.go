@@ -165,7 +165,12 @@ func RelayHandler(c *gin.Context) {
 			log.Printf("[relay] retry attempt %d/%d, channel=%s", attempt+1, maxAttempts, retryChannels[attempt].Name)
 		}
 
-		err := sendAndHandleRequest(c, path, mode, info, body, retryChannels[attempt], bodyModel, startTime)
+		var err error
+		if info.Format == "responses" {
+			err = handleResponsesAutoDetect(c, path, mode, info, body, retryChannels[attempt], bodyModel, startTime)
+		} else {
+			err = sendAndHandleRequestWithAdaptor(c, path, mode, info, body, retryChannels[attempt], nil, bodyModel, startTime)
+		}
 		if err == nil {
 			return
 		}
@@ -182,6 +187,144 @@ func RelayHandler(c *gin.Context) {
 	c.JSON(http.StatusBadGateway, gin.H{"error": "all channels failed: " + lastErr.Error()})
 }
 
+// handleResponsesAutoDetect tries passthrough first, falls back to protocol conversion.
+func handleResponsesAutoDetect(c *gin.Context, path string, mode int, info *RelayInfo, body []byte, ch *config.ChannelConfig, bodyModel string, startTime time.Time) error {
+	// Parse model from body for cache lookup
+	model := bodyModel
+	if model == "" {
+		var m struct{ Model string `json:"model"` }
+		if json.Unmarshal(body, &m) == nil && m.Model != "" {
+			model = m.Model
+		}
+	}
+	upstreamModel := channel.ResolveModelAlias(model)
+
+	// Check cache
+	supported, known := supportsResponses(ch.Name, upstreamModel)
+	if known {
+		if supported {
+			debugLog("[RESPONSES DETECT] cache hit: passthrough for %s:%s", ch.Name, upstreamModel)
+			return doResponsesPassthrough(c, info, body, ch, model)
+		}
+		debugLog("[RESPONSES DETECT] cache hit: convert for %s:%s", ch.Name, upstreamModel)
+		return sendAndHandleRequestWithAdaptor(c, path, mode, info, body, ch, nil, model, startTime)
+	}
+
+	// Unknown: try passthrough first
+	debugLog("[RESPONSES DETECT] trying passthrough for %s:%s", ch.Name, upstreamModel)
+	err := doResponsesPassthrough(c, info, body, ch, model)
+	if err == nil {
+		markResponsesSupport(ch.Name, upstreamModel, true)
+		log.Printf("[responses] model %s on channel %s supports native Responses API", upstreamModel, ch.Name)
+		return nil
+	}
+
+	// Passthrough failed — check if it's a "not supported" error
+	if !isResponsesUnsupportedError(info.LastUpstreamStatusCode) {
+		// Other errors (network, timeout, etc.) — don't cache, just return
+		return err
+	}
+
+	// Upstream doesn't support Responses — mark and fall back to conversion
+	markResponsesSupport(ch.Name, upstreamModel, false)
+	log.Printf("[responses] model %s on channel %s does not support Responses API, using conversion", upstreamModel, ch.Name)
+	return sendAndHandleRequestWithAdaptor(c, path, mode, info, body, ch, nil, model, startTime)
+}
+
+// doResponsesPassthrough sends a Responses request directly to upstream without conversion.
+func doResponsesPassthrough(c *gin.Context, info *RelayInfo, body []byte, ch *config.ChannelConfig, bodyModel string) error {
+	adaptor := &ResponsesPassthroughAdaptor{}
+	info.APIKey = ch.APIKey
+	info.BaseURL = ch.BaseURL
+	info.ChannelName = ch.Name
+	info.CustomHeaders = ch.Headers
+	info.Format = "responses"
+
+	convertedReq, err := adaptor.ConvertRequest(c, info, body)
+	if err != nil {
+		return err
+	}
+
+	reqJSON, _ := json.Marshal(convertedReq)
+	if len(globalCfg.ParamOverride) > 0 {
+		reqBody := make(map[string]any)
+		if json.Unmarshal(reqJSON, &reqBody) == nil {
+			reqBody = ApplyParamOverride(reqBody, globalCfg.ParamOverride)
+			reqJSON, _ = json.Marshal(reqBody)
+		}
+	}
+
+	debugUpstreamBody := string(reqJSON)
+	if len(debugUpstreamBody) > 1000 {
+		debugUpstreamBody = debugUpstreamBody[:1000] + "..."
+	}
+	upstreamURL, _ := adaptor.GetRequestURL(info)
+	debugLog("[PASSTHROUGH REQUEST] url=%s, body=%s", upstreamURL, debugUpstreamBody)
+
+	reader := bytes.NewReader(reqJSON)
+	resp, err := adaptor.DoRequest(c, info, reader)
+	if err != nil {
+		return err
+	}
+	httpResp := resp.(*http.Response)
+	info.LastUpstreamStatusCode = httpResp.StatusCode
+
+	// Check if upstream returned an error indicating Responses not supported
+	if isResponsesUnsupportedError(httpResp.StatusCode) {
+		bodyBytes, _ := io.ReadAll(httpResp.Body)
+		httpResp.Body.Close()
+		debugLog("[PASSTHROUGH] upstream returned %d, falling back: %s", httpResp.StatusCode, truncateStr(string(bodyBytes), 200))
+		return fmt.Errorf("upstream returned %d", httpResp.StatusCode)
+	}
+
+	// Other HTTP errors — pass through to client
+	if httpResp.StatusCode != http.StatusOK {
+		bodyBytes, _ := io.ReadAll(httpResp.Body)
+		httpResp.Body.Close()
+		info.LastUpstreamStatusCode = httpResp.StatusCode
+		c.JSON(httpResp.StatusCode, map[string]any{"error": map[string]any{"message": string(bodyBytes), "type": "upstream_error"}})
+		return nil
+	}
+
+	// Success — forward response to client
+	if info.IsStream {
+		if streamErr := adaptor.streamPassthrough(c, httpResp, info); streamErr != nil {
+			return streamErr
+		}
+		channel.RecordStats(info.ClientAPIKeyName, info.OriginModel, info.InputTokens, info.OutputTokens)
+		return nil
+	}
+
+	bodyBytes, err := io.ReadAll(httpResp.Body)
+	httpResp.Body.Close()
+	if err != nil {
+		return err
+	}
+	var result any
+	if json.Unmarshal(bodyBytes, &result) == nil {
+		if r, ok := result.(map[string]any); ok {
+			if usage, ok := r["usage"].(map[string]any); ok {
+				if v, ok := usage["input_tokens"].(float64); ok {
+					info.InputTokens = int(v)
+				} else if v, ok := usage["input_tokens"].(int); ok {
+					info.InputTokens = v
+				}
+				if v, ok := usage["output_tokens"].(float64); ok {
+					info.OutputTokens = int(v)
+				} else if v, ok := usage["output_tokens"].(int); ok {
+					info.OutputTokens = v
+				}
+			}
+		}
+		channel.RecordStats(info.ClientAPIKeyName, info.OriginModel, info.InputTokens, info.OutputTokens)
+		c.JSON(httpResp.StatusCode, result)
+		return nil
+	}
+	// Fallback: return raw body
+	c.Data(httpResp.StatusCode, "application/json", bodyBytes)
+	return nil
+}
+
 func resolveChannel(path string, bodyModel string, c *gin.Context, clientAPIKey string) (*config.ChannelConfig, *config.APIKeyConfig, string) {
 	format := ""
 
@@ -192,6 +335,10 @@ func resolveChannel(path string, bodyModel string, c *gin.Context, clientAPIKey 
 	} else if strings.Contains(path, "/models/") && (strings.Contains(path, ":generateContent") || strings.Contains(path, ":streamGenerateContent")) {
 		ch := channel.GetDefault()
 		format = "gemini_to_openai"
+		return ch, nil, format
+	} else if strings.HasPrefix(path, "/v1/responses") {
+		ch := channel.GetDefault()
+		format = "responses"
 		return ch, nil, format
 	} else {
 		targetFormat := c.GetHeader("X-Target-Format")
@@ -212,6 +359,10 @@ func resolveChannel(path string, bodyModel string, c *gin.Context, clientAPIKey 
 }
 
 func sendAndHandleRequest(c *gin.Context, path string, mode int, info *RelayInfo, body []byte, ch *config.ChannelConfig, bodyModel string, startTime time.Time) error {
+	return sendAndHandleRequestWithAdaptor(c, path, mode, info, body, ch, nil, bodyModel, startTime)
+}
+
+func sendAndHandleRequestWithAdaptor(c *gin.Context, path string, mode int, info *RelayInfo, body []byte, ch *config.ChannelConfig, adaptorOverride Adaptor, bodyModel string, startTime time.Time) error {
 	// Setup channel info
 	info.APIKey = ch.APIKey
 	info.BaseURL = ch.BaseURL
@@ -225,7 +376,10 @@ func sendAndHandleRequest(c *gin.Context, path string, mode int, info *RelayInfo
 	debugLog("[ROUTING] channel=%s, format=%s, model=%s, is_stream=%v, origin_model=%s, upstream_model=%s",
 		info.ChannelName, info.Format, bodyModel, info.IsStream, info.OriginModel, info.UpstreamModel)
 
-	adaptor := GetAdaptorByFormat(info.Format, mode)
+	adaptor := adaptorOverride
+	if adaptor == nil {
+		adaptor = GetAdaptorByFormat(info.Format, mode)
+	}
 
 	convertedReq, err := adaptor.ConvertRequest(c, info, body)
 	if err != nil {
@@ -254,7 +408,8 @@ func sendAndHandleRequest(c *gin.Context, path string, mode int, info *RelayInfo
 	if len(debugUpstreamBody) > 1000 {
 		debugUpstreamBody = debugUpstreamBody[:1000] + "..."
 	}
-	debugLog("[UPSTREAM REQUEST] url=%s, body=%s", info.BaseURL+"/v1/chat/completions", debugUpstreamBody)
+	upstreamURL, _ := adaptor.GetRequestURL(info)
+	debugLog("[UPSTREAM REQUEST] url=%s, body=%s", upstreamURL, debugUpstreamBody)
 	reader := bytes.NewReader(reqJSON)
 
 	resp, err := adaptor.DoRequest(c, info, reader)
@@ -294,6 +449,16 @@ func sendAndHandleRequest(c *gin.Context, path string, mode int, info *RelayInfo
 
 	if info.IsStream && info.Format == "openai_to_gemini" {
 		if streamErr := adaptor.(*OpenAIToGeminiAdaptor).streamGeminiToOpenAI(c, httpResp, info); streamErr != nil {
+			logRelayResponse(info, adaptor, httpResp.StatusCode, time.Since(startTime), streamErr)
+			return streamErr
+		}
+		logRelayResponse(info, adaptor, httpResp.StatusCode, time.Since(startTime), nil)
+		channel.RecordStats(info.ClientAPIKeyName, info.OriginModel, info.InputTokens, info.OutputTokens)
+		return nil
+	}
+
+	if info.IsStream && info.Format == "responses" {
+		if streamErr := adaptor.(*ResponsesAdaptor).streamChatToResponses(c, httpResp, info); streamErr != nil {
 			logRelayResponse(info, adaptor, httpResp.StatusCode, time.Since(startTime), streamErr)
 			return streamErr
 		}

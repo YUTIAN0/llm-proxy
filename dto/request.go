@@ -1,5 +1,7 @@
 package dto
 
+import "encoding/json"
+
 // OpenAIMessage represents a message in OpenAI format
 type OpenAIMessage struct {
 	Role             string          `json:"role"`
@@ -116,4 +118,95 @@ type Source struct {
 	Type      string `json:"type"`
 	MediaType string `json:"media_type"`
 	Data      string `json:"data"`
+}
+
+// OpenAIResponsesRequest represents an OpenAI Responses API request.
+type OpenAIResponsesRequest struct {
+	Model              string          `json:"model"`
+	Input              json.RawMessage `json:"input,omitempty"`
+	Instructions       json.RawMessage `json:"instructions,omitempty"`
+	Stream             *bool           `json:"stream,omitempty"`
+	Temperature        *float64        `json:"temperature,omitempty"`
+	TopP               *float64        `json:"top_p,omitempty"`
+	MaxOutputTokens    *int            `json:"max_output_tokens,omitempty"`
+	ToolChoice         json.RawMessage `json:"tool_choice,omitempty"`
+	Tools              json.RawMessage `json:"tools,omitempty"`
+	Text               json.RawMessage `json:"text,omitempty"`
+	Reasoning          *ResponsesReasoning `json:"reasoning,omitempty"`
+	ParallelToolCalls  json.RawMessage `json:"parallel_tool_calls,omitempty"`
+	Store              json.RawMessage `json:"store,omitempty"`
+	Metadata           json.RawMessage `json:"metadata,omitempty"`
+	User               json.RawMessage `json:"user,omitempty"`
+	PreviousResponseID string          `json:"previous_response_id,omitempty"`
+}
+
+// ResponsesReasoning controls reasoning for Responses API.
+type ResponsesReasoning struct {
+	Effort  string `json:"effort,omitempty"`
+	Summary string `json:"summary,omitempty"`
+}
+
+// OpenAIResponsesResponse represents an OpenAI Responses API response.
+type OpenAIResponsesResponse struct {
+	ID               string               `json:"id"`
+	Object           string               `json:"object"`
+	CreatedAt        int                  `json:"created_at"`
+	Status           string               `json:"status"`
+	Model            string               `json:"model"`
+	Output           []ResponsesOutput    `json:"output"`
+	Usage            *ResponsesUsage      `json:"usage"`
+	Error            any                  `json:"error,omitempty"`
+}
+
+// ResponsesOutput represents an output item in Responses API.
+type ResponsesOutput struct {
+	Type      string                   `json:"type"`
+	ID        string                   `json:"id"`
+	Status    string                   `json:"status"`
+	Role      string                   `json:"role"`
+	Content   []ResponsesOutputContent `json:"content"`
+	CallID    string                   `json:"call_id,omitempty"`
+	Name      string                   `json:"name,omitempty"`
+	Arguments json.RawMessage          `json:"arguments,omitempty"`
+}
+
+// ArgumentsString returns function call arguments as string.
+func (r *ResponsesOutput) ArgumentsString() string {
+	if r == nil || len(r.Arguments) == 0 {
+		return ""
+	}
+	return string(r.Arguments)
+}
+
+// ResponsesOutputContent represents content in a Responses output item.
+type ResponsesOutputContent struct {
+	Type string `json:"type"`
+	Text string `json:"text"`
+}
+
+// ResponsesUsage represents usage in Responses API.
+type ResponsesUsage struct {
+	InputTokens            int `json:"input_tokens"`
+	OutputTokens           int `json:"output_tokens"`
+	TotalTokens            int `json:"total_tokens"`
+	InputTokensDetails     *ResponsesTokenDetails `json:"input_tokens_details,omitempty"`
+	OutputTokensDetails    *ResponsesTokenDetails `json:"output_tokens_details,omitempty"`
+}
+
+// ResponsesTokenDetails represents detailed token counts.
+type ResponsesTokenDetails struct {
+	CachedTokens  int `json:"cached_tokens,omitempty"`
+	TextTokens    int `json:"text_tokens,omitempty"`
+	ReasoningTokens int `json:"reasoning_tokens,omitempty"`
+}
+
+// ResponsesStreamEvent represents an SSE event from the Responses API stream.
+type ResponsesStreamEvent struct {
+	Type         string                  `json:"type"`
+	Response     *OpenAIResponsesResponse `json:"response,omitempty"`
+	Delta        string                  `json:"delta,omitempty"`
+	Item         *ResponsesOutput        `json:"item,omitempty"`
+	OutputIndex  *int                    `json:"output_index,omitempty"`
+	ContentIndex *int                    `json:"content_index,omitempty"`
+	ItemID       string                  `json:"item_id,omitempty"`
 }
