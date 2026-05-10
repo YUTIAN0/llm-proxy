@@ -594,6 +594,203 @@ func extractOutputText(resp *dto.OpenAIResponsesResponse) string {
 }
 
 // extractMsgText extracts text from message content (string or array).
+// CompactRequestToChatRequest converts a /responses/compact request to Chat Completions format.
+// The compact operation is expressed as a chat request asking the model to compact the conversation.
+func CompactRequestToChatRequest(req *dto.OpenAIResponsesCompactRequest) (*dto.OpenAIChatRequest, error) {
+	if req == nil {
+		return nil, fmt.Errorf("request is nil")
+	}
+	if req.Model == "" {
+		return nil, fmt.Errorf("model is required")
+	}
+
+	chatReq := &dto.OpenAIChatRequest{
+		Model: req.Model,
+	}
+
+	// Parse instructions as system message
+	var instructions string
+	if len(req.Instructions) > 0 {
+		_ = json.Unmarshal(req.Instructions, &instructions)
+	}
+
+	// Build the compaction prompt
+	chatReq.Messages = []dto.OpenAIMessage{
+		{Role: "system", Content: buildCompactSystemPrompt(instructions)},
+	}
+
+	// Parse input messages and append as context
+	if len(req.Input) > 0 {
+		var inputStr string
+		if err := json.Unmarshal(req.Input, &inputStr); err == nil {
+			chatReq.Messages = append(chatReq.Messages, dto.OpenAIMessage{
+				Role:    "user",
+				Content: inputStr,
+			})
+		} else {
+			var inputItems []map[string]any
+			if err := json.Unmarshal(req.Input, &inputItems); err != nil {
+				return nil, fmt.Errorf("failed to parse compact input: %w", err)
+			}
+			// Convert input items to messages
+			for _, item := range inputItems {
+				itemType, _ := item["type"].(string)
+				if itemType == "function_call_output" {
+					callID, _ := item["call_id"].(string)
+					output, _ := item["output"].(string)
+					chatReq.Messages = append(chatReq.Messages, dto.OpenAIMessage{
+						Role:       "tool",
+						ToolCallID: callID,
+						Content:    output,
+					})
+					continue
+				}
+				if itemType == "function_call" {
+					callID, _ := item["call_id"].(string)
+					name, _ := item["name"].(string)
+					var args string
+					if a, ok := item["arguments"].(string); ok {
+						args = a
+					} else if item["arguments"] != nil {
+						b, _ := json.Marshal(item["arguments"])
+						args = string(b)
+					}
+					lastIdx := len(chatReq.Messages) - 1
+					if lastIdx >= 0 && chatReq.Messages[lastIdx].Role == "assistant" {
+						chatReq.Messages[lastIdx].ToolCalls = append(chatReq.Messages[lastIdx].ToolCalls, dto.ToolCall{
+							ID:   callID,
+							Type: "function",
+							Function: dto.FunctionResponse{
+								Name:      name,
+								Arguments: args,
+							},
+						})
+					} else {
+						chatReq.Messages = append(chatReq.Messages, dto.OpenAIMessage{
+							Role: "assistant",
+							ToolCalls: []dto.ToolCall{
+								{
+									ID:   callID,
+									Type: "function",
+									Function: dto.FunctionResponse{
+										Name:      name,
+										Arguments: args,
+									},
+								},
+							},
+						})
+					}
+					continue
+				}
+
+				role, _ := item["role"].(string)
+				if role == "" {
+					role = "user"
+				}
+				content := extractItemContent(item)
+				chatReq.Messages = append(chatReq.Messages, dto.OpenAIMessage{
+					Role:    role,
+					Content: content,
+				})
+			}
+		}
+	}
+
+	// Add the final compaction instruction
+	chatReq.Messages = append(chatReq.Messages, dto.OpenAIMessage{
+		Role:    "user",
+		Content: "Please compact the above conversation history. Return a concise summary that preserves all important context, decisions, and information needed to continue the conversation effectively.",
+	})
+
+	return chatReq, nil
+}
+
+// buildCompactSystemPrompt builds the system prompt for the compaction request.
+func buildCompactSystemPrompt(instructions string) string {
+	base := "You are a conversation compaction assistant. Your task is to compress conversation history into a compact format that preserves all essential information, context, and decisions."
+	if instructions != "" {
+		return base + "\n\nAdditional instructions: " + instructions
+	}
+	return base
+}
+
+// extractItemContent extracts text content from a message item.
+func extractItemContent(item map[string]any) string {
+	if contentRaw, ok := item["content"]; ok {
+		switch c := contentRaw.(type) {
+		case string:
+			return c
+		case []any:
+			var texts []string
+			for _, part := range c {
+				if m, ok := part.(map[string]any); ok {
+					textType, _ := m["type"].(string)
+					if textType == "input_text" || textType == "output_text" || textType == "text" {
+						if t, ok := m["text"].(string); ok && t != "" {
+							texts = append(texts, t)
+						}
+					}
+				}
+			}
+			if len(texts) > 0 {
+				return strings.Join(texts, "\n")
+			}
+			return fmt.Sprintf("%v", contentRaw)
+		default:
+			return fmt.Sprintf("%v", contentRaw)
+		}
+	}
+	return ""
+}
+
+// ChatResponseToCompactResponse converts a Chat Completions response to compact response format.
+func ChatResponseToCompactResponse(chatResp map[string]any, model string) (*dto.OpenAIResponsesCompactResponse, error) {
+	resp := &dto.OpenAIResponsesCompactResponse{
+		ID:        fmt.Sprintf("cmp_%d", time.Now().UnixNano()),
+		Object:    "response.compaction",
+		CreatedAt: int(time.Now().Unix()),
+	}
+
+	// Extract text from choices
+	if choices, ok := chatResp["choices"].([]any); ok && len(choices) > 0 {
+		if choice, ok := choices[0].(map[string]any); ok {
+			if msg, ok := choice["message"].(map[string]any); ok {
+				if content, ok := msg["content"].(string); ok && content != "" {
+					// Output is an array of message items in compact format
+					resp.Output = json.RawMessage(fmt.Sprintf(`[{"type":"message","role":"assistant","content":[{"type":"output_text","text":%s}]}]`,
+						mustMarshalJSON(content)))
+				}
+			}
+		}
+	}
+
+	// Extract usage
+	if usageRaw, ok := chatResp["usage"].(map[string]any); ok {
+		promptTokens, _ := usageRaw["prompt_tokens"].(float64)
+		completionTokens, _ := usageRaw["completion_tokens"].(float64)
+		totalTokens, _ := usageRaw["total_tokens"].(float64)
+		resp.Usage = &dto.ResponsesUsage{
+			InputTokens:  int(promptTokens),
+			OutputTokens: int(completionTokens),
+			TotalTokens:  int(totalTokens),
+		}
+		if resp.Usage.TotalTokens == 0 {
+			resp.Usage.TotalTokens = resp.Usage.InputTokens + resp.Usage.OutputTokens
+		}
+	}
+
+	return resp, nil
+}
+
+// mustMarshalJSON marshals a value to JSON string, returning "{}" on error.
+func mustMarshalJSON(v any) string {
+	b, err := json.Marshal(v)
+	if err != nil {
+		return `""`
+	}
+	return string(b)
+}
+
 func extractMsgText(content any) string {
 	switch c := content.(type) {
 	case string:

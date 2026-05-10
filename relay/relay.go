@@ -14,6 +14,7 @@ import (
 	"github.com/llm-proxy/channel"
 	"github.com/llm-proxy/config"
 	"github.com/llm-proxy/dto"
+	"github.com/llm-proxy/proxy"
 	"github.com/llm-proxy/relay/constant"
 	"github.com/llm-proxy/service"
 )
@@ -168,6 +169,8 @@ func RelayHandler(c *gin.Context) {
 		var err error
 		if info.Format == "responses" {
 			err = handleResponsesAutoDetect(c, path, mode, info, body, retryChannels[attempt], bodyModel, startTime)
+		} else if info.Format == "responses_compact" {
+			err = handleCompactAutoDetect(c, info, body, retryChannels[attempt], bodyModel)
 		} else {
 			err = sendAndHandleRequestWithAdaptor(c, path, mode, info, body, retryChannels[attempt], nil, bodyModel, startTime)
 		}
@@ -322,6 +325,215 @@ func doResponsesPassthrough(c *gin.Context, info *RelayInfo, body []byte, ch *co
 	}
 	// Fallback: return raw body
 	c.Data(httpResp.StatusCode, "application/json", bodyBytes)
+	return nil
+}
+
+// handleCompactAutoDetect tries passthrough first for /responses/compact, falls back to conversion.
+func handleCompactAutoDetect(c *gin.Context, info *RelayInfo, body []byte, ch *config.ChannelConfig, bodyModel string) error {
+	model := bodyModel
+	if model == "" {
+		var m struct{ Model string `json:"model"` }
+		if json.Unmarshal(body, &m) == nil && m.Model != "" {
+			model = m.Model
+		}
+	}
+	upstreamModel := channel.ResolveModelAlias(model)
+
+	// Check cache
+	supported, known := supportsCompact(ch.Name, upstreamModel)
+	if known {
+		if supported {
+			debugLog("[COMPACT DETECT] cache hit: passthrough for %s:%s", ch.Name, upstreamModel)
+			return doCompactPassthrough(c, info, body, ch, model)
+		}
+		debugLog("[COMPACT DETECT] cache hit: convert for %s:%s", ch.Name, upstreamModel)
+		return doCompactConversion(c, info, body, ch, model)
+	}
+
+	// Unknown: try passthrough first
+	debugLog("[COMPACT DETECT] trying passthrough for %s:%s", ch.Name, upstreamModel)
+	err := doCompactPassthrough(c, info, body, ch, model)
+	if err == nil {
+		markCompactSupport(ch.Name, upstreamModel, true)
+		log.Printf("[compact] model %s on channel %s supports native compact endpoint", upstreamModel, ch.Name)
+		return nil
+	}
+
+	// Passthrough failed — check if it's a "not supported" or upstream routing error
+	// For compact, we're more aggressive with fallback since it's a newer endpoint
+	// and upstream support varies. Any HTTP error (not just 400/404/405) should trigger conversion.
+	if info.LastUpstreamStatusCode >= 400 {
+		markCompactSupport(ch.Name, upstreamModel, false)
+		log.Printf("[compact] model %s on channel %s returned %d, using conversion", upstreamModel, ch.Name, info.LastUpstreamStatusCode)
+		return doCompactConversion(c, info, body, ch, model)
+	}
+
+	// Non-HTTP errors (network, timeout, etc.) — don't cache, just return
+	return err
+}
+
+// doCompactPassthrough sends a compact request directly to upstream without conversion.
+// Returns a non-nil error for any HTTP error so the caller can decide whether to fall back.
+func doCompactPassthrough(c *gin.Context, info *RelayInfo, body []byte, ch *config.ChannelConfig, bodyModel string) error {
+	adaptor := &ResponsesCompactAdaptor{}
+	info.APIKey = ch.APIKey
+	info.BaseURL = ch.BaseURL
+	info.ChannelName = ch.Name
+	info.CustomHeaders = ch.Headers
+	info.Format = "responses_compact"
+
+	convertedReq, err := adaptor.ConvertRequest(c, info, body)
+	if err != nil {
+		return err
+	}
+
+	reqJSON, _ := json.Marshal(convertedReq)
+	if len(globalCfg.ParamOverride) > 0 {
+		reqBody := make(map[string]any)
+		if json.Unmarshal(reqJSON, &reqBody) == nil {
+			reqBody = ApplyParamOverride(reqBody, globalCfg.ParamOverride)
+			reqJSON, _ = json.Marshal(reqBody)
+		}
+	}
+
+	debugUpstreamBody := string(reqJSON)
+	if len(debugUpstreamBody) > 1000 {
+		debugUpstreamBody = debugUpstreamBody[:1000] + "..."
+	}
+	upstreamURL, _ := adaptor.GetRequestURL(info)
+	debugLog("[COMPACT REQUEST] url=%s, body=%s", upstreamURL, debugUpstreamBody)
+
+	reader := bytes.NewReader(reqJSON)
+	resp, err := adaptor.DoRequest(c, info, reader)
+	if err != nil {
+		return err
+	}
+	httpResp := resp.(*http.Response)
+	info.LastUpstreamStatusCode = httpResp.StatusCode
+
+	// Any HTTP error — return error so caller can fall back to conversion
+	if httpResp.StatusCode != http.StatusOK {
+		bodyBytes, _ := io.ReadAll(httpResp.Body)
+		httpResp.Body.Close()
+		debugLog("[COMPACT] upstream returned %d: %s", httpResp.StatusCode, truncateStr(string(bodyBytes), 200))
+		return fmt.Errorf("upstream returned %d", httpResp.StatusCode)
+	}
+
+	// Success — forward response to client
+	result, err := adaptor.DoResponse(c, httpResp, info)
+	if err != nil {
+		return err
+	}
+	channel.RecordStats(info.ClientAPIKeyName, info.OriginModel, info.InputTokens, info.OutputTokens)
+	c.JSON(http.StatusOK, result)
+	return nil
+}
+
+// doCompactConversion converts a compact request to Chat Completions format, sends it upstream,
+// and converts the response back to compact format.
+func doCompactConversion(c *gin.Context, info *RelayInfo, body []byte, ch *config.ChannelConfig, bodyModel string) error {
+	// Parse compact request
+	var compactReq dto.OpenAIResponsesCompactRequest
+	if err := json.Unmarshal(body, &compactReq); err != nil {
+		return fmt.Errorf("failed to parse compact request: %w", err)
+	}
+
+	info.OriginModel = compactReq.Model
+	info.UpstreamModel = channel.ResolveModelAlias(compactReq.Model)
+	info.APIKey = ch.APIKey
+	info.BaseURL = ch.BaseURL
+	info.ChannelName = ch.Name
+	info.CustomHeaders = ch.Headers
+
+	// Convert compact → chat
+	chatReq, err := CompactRequestToChatRequest(&compactReq)
+	if err != nil {
+		return fmt.Errorf("failed to convert compact to chat: %w", err)
+	}
+	chatReq.Model = info.UpstreamModel
+
+	reqJSON, _ := json.Marshal(chatReq)
+
+	// Apply param override
+	if len(globalCfg.ParamOverride) > 0 {
+		reqBody := make(map[string]any)
+		if json.Unmarshal(reqJSON, &reqBody) == nil {
+			reqBody = ApplyParamOverride(reqBody, globalCfg.ParamOverride)
+			reqJSON, _ = json.Marshal(reqBody)
+		}
+	}
+
+	debugBody := string(reqJSON)
+	if len(debugBody) > 1000 {
+		debugBody = debugBody[:1000] + "..."
+	}
+	debugLog("[COMPACT CONVERT] url=%s/v1/chat/completions, body=%s", ch.BaseURL, debugBody)
+
+	// Build URL
+	upstreamURL := ch.BaseURL
+	if strings.HasSuffix(upstreamURL, "/v1") {
+		upstreamURL += "/chat/completions"
+	} else {
+		upstreamURL += "/v1/chat/completions"
+	}
+
+	// Send request
+	httpReq, err := http.NewRequest("POST", upstreamURL, bytes.NewReader(reqJSON))
+	if err != nil {
+		return err
+	}
+	httpReq.Header.Set("Content-Type", "application/json")
+	httpReq.Header.Set("Authorization", "Bearer "+ch.APIKey)
+	for k, v := range ch.Headers {
+		httpReq.Header.Set(k, v)
+	}
+
+	client := proxy.GetClientWithTimeout(getRequestTimeout())
+	httpResp, err := client.Do(httpReq)
+	if err != nil {
+		return err
+	}
+	defer httpResp.Body.Close()
+	info.LastUpstreamStatusCode = httpResp.StatusCode
+
+	// Check for retry trigger
+	if shouldRetry(httpResp) {
+		respBody, _ := io.ReadAll(httpResp.Body)
+		log.Printf("[compact] retry trigger: status=%d body=%s", httpResp.StatusCode, truncateStr(string(respBody), 200))
+		return fmt.Errorf("upstream returned %d", httpResp.StatusCode)
+	}
+
+	respBody, err := io.ReadAll(httpResp.Body)
+	if err != nil {
+		return err
+	}
+
+	if httpResp.StatusCode != http.StatusOK {
+		c.JSON(httpResp.StatusCode, map[string]any{"error": map[string]any{"message": string(respBody), "type": "upstream_error"}})
+		return nil
+	}
+
+	// Parse chat response
+	var chatResp map[string]any
+	if err := json.Unmarshal(respBody, &chatResp); err != nil {
+		c.Data(httpResp.StatusCode, "application/json", respBody)
+		return nil
+	}
+
+	// Convert chat → compact response
+	compactResp, err := ChatResponseToCompactResponse(chatResp, info.OriginModel)
+	if err != nil {
+		return fmt.Errorf("failed to convert chat to compact: %w", err)
+	}
+
+	// Extract usage
+	if compactResp.Usage != nil {
+		info.InputTokens = compactResp.Usage.InputTokens
+		info.OutputTokens = compactResp.Usage.OutputTokens
+	}
+
+	channel.RecordStats(info.ClientAPIKeyName, info.OriginModel, info.InputTokens, info.OutputTokens)
+	c.JSON(http.StatusOK, compactResp)
 	return nil
 }
 
